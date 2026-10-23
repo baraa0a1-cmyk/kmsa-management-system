@@ -39,7 +39,7 @@ export async function plans(): Promise<Plan[]> {
 export async function milestones(): Promise<Milestone[]> {
   const { data,error }=await supabase.from('milestones').select('*, result:results(*), owner:profiles!milestones_owner_id_fkey(id,full_name)').order('due_at',{ascending:true}); if(error) throw error; return data||[];
 }
-export async function milestoneBundle(id:string) {
+export async function milestoneBundle(id:string): Promise<{ milestone: Milestone; commitments: WeeklyCommitment[]; evidence: Evidence[]; blockers: Blocker[]; interventions: Intervention[]; verifications: any[] }> {
   const [m,c,e,b,i,v] = await Promise.all([
     supabase.from('milestones').select('*, result:results(*), owner:profiles!milestones_owner_id_fkey(id,full_name)').eq('id',id).single(),
     supabase.from('weekly_commitments').select('*').eq('milestone_id',id).order('week_start',{ascending:false}),
@@ -49,7 +49,7 @@ export async function milestoneBundle(id:string) {
     supabase.from('verifications').select('*, verifier:profiles(full_name)').eq('milestone_id',id).order('created_at',{ascending:false})
   ]);
   for (const r of [m,c,e,b,i,v]) if(r.error) throw r.error;
-  return {milestone:m.data, commitments:c.data as WeeklyCommitment[], evidence:e.data as Evidence[], blockers:b.data as Blocker[], interventions:i.data as Intervention[], verifications:v.data};
+  return {milestone:m.data as Milestone, commitments:c.data as WeeklyCommitment[], evidence:e.data as Evidence[], blockers:b.data as Blocker[], interventions:i.data as Intervention[], verifications:v.data || []};
 }
 export async function weeklyReport(weekStart?:string) {
   const { data,error }=await supabase.rpc('weekly_report',{p_week_start:weekStart||null}); if(error) throw error; return data||[];

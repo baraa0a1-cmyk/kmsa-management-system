@@ -6,9 +6,10 @@ import { useAuth } from '../hooks/useAuth';
 import { StatusBadge } from '../components/StatusBadge';
 import { executionStatusLabel, formatDateTime, proposalStatusLabel } from '../lib/labels';
 import { Modal } from '../components/Modal';
+import type { Proposal } from '../lib/types';
 
 export default function ProposalPage(){
- const {id}=useParams(); const {profile}=useAuth(); const [p,setP]=useState<any>(null); const [hist,setHist]=useState<any>({actions:[],versions:[],attachments:[]}); const [modal,setModal]=useState<string|null>(null); const [note,setNote]=useState(''); const [busy,setBusy]=useState(false);
+ const {id}=useParams(); const {profile}=useAuth(); const [p,setP]=useState<Proposal|null>(null); const [hist,setHist]=useState<any>({actions:[],versions:[],attachments:[]}); const [modal,setModal]=useState<string|null>(null); const [note,setNote]=useState(''); const [busy,setBusy]=useState(false);
  async function load(){if(!id)return;const [a,b]=await Promise.all([proposalById(id),proposalHistory(id)]);setP(a);setHist(b)} useEffect(()=>{load()},[id]); if(!p)return <div className="splash"><div className="loader"/></div>;
  const staff=profile&&['SECRETARY','GS','ADMIN'].includes(profile.role); const gs=profile&&['GS','ADMIN'].includes(profile.role); const owner=profile?.id===p.applicant_id;
  async function act(action:string,payload:any={}){setBusy(true);try{await workflow(action,{proposalId:id,...payload});setModal(null);setNote('');await load()}finally{setBusy(false)}}
