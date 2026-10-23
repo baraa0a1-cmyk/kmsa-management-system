@@ -1,0 +1,12 @@
+import { useEffect, useState } from 'react';
+import { Save, Settings2 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { secretariats, workflow } from '../lib/api';
+import type { Secretariat } from '../lib/types';
+
+export default function AdminPage(){
+ const [settings,setSettings]=useState<any>({secretary_sla_hours:48,gs_sla_hours:48,current_cycle:''}); const [secs,setSecs]=useState<Secretariat[]>([]); const [busy,setBusy]=useState(false);
+ useEffect(()=>{(async()=>{const [s,{data}]=await Promise.all([secretariats(),supabase.from('system_settings').select('*')]);setSecs(s);const obj:any={};(data||[]).forEach((x:any)=>obj[x.key]=x.value);setSettings((v:any)=>({...v,...obj}))})()},[]);
+ async function save(){setBusy(true);try{await workflow('ADMIN_SETTINGS_UPDATE',{settings})}finally{setBusy(false)}}
+ return <><div className="page-head"><div><h1>إدارة النظام</h1><p>الإعدادات المؤسسية، الدورة الحالية، SLA، السكرتاريات والأدوار.</p></div><button className="btn btn-primary" onClick={save} disabled={busy}><Save size={16}/>{busy?'جارٍ الحفظ…':'حفظ الإعدادات'}</button></div><div className="grid grid-2"><section className="card card-pad"><div className="section-title"><div><h2>إعدادات الدورة والمتابعة</h2></div></div><div className="form-grid"><div className="field"><label>SLA السكرتير بالساعات</label><input className="input" type="number" value={settings.secretary_sla_hours||48} onChange={e=>setSettings({...settings,secretary_sla_hours:Number(e.target.value)})}/></div><div className="field"><label>SLA السكرتارية العامة بالساعات</label><input className="input" type="number" value={settings.gs_sla_hours||48} onChange={e=>setSettings({...settings,gs_sla_hours:Number(e.target.value)})}/></div><div className="field full"><label>رمز الدورة الحالية</label><input className="input" value={settings.current_cycle||''} onChange={e=>setSettings({...settings,current_cycle:e.target.value})}/></div></div></section><section className="card card-pad"><div className="section-title"><div><h2>السكرتاريات</h2><p>تحديد السكرتير نفسه يتم من صفحة المستخدمين.</p></div></div><div className="list">{secs.map(s=><div className="list-item" key={s.id}><div className="item-main"><div className="item-title">{s.name_ar}</div><div className="item-meta"><span className="mono">{s.code}</span></div></div></div>)}</div></section></div><div className="callout section-gap"><Settings2 size={16}/> رفع قاعدة المستخدمين سيتم لاحقًا عبر ملف CSV/JSON. كلمات السر لا تُحفظ في جدول profiles؛ تُمرر مرة واحدة إلى Supabase Auth عند إنشاء الحساب.</div></>
+}

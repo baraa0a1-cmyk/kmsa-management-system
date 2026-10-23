@@ -1,0 +1,11 @@
+{
+  "name": "KMSA Management System",
+  "short_name": "KMSA",
+  "start_url": "./#/?source=pwa",
+  "display": "standalone",
+  "background_color": "#f5f7f4",
+  "theme_color": "#0d2b24",
+  "lang": "ar",
+  "dir": "rtl",
+  "description": "منصة إدارة عمل رابطة طلاب كلية الطب"
+}
