@@ -8,7 +8,7 @@ import { milestoneStatusLabel, formatDate, formatDateTime } from '../lib/labels'
 import { Modal } from '../components/Modal';
 
 export default function MilestonePage(){
- const {id}=useParams(); const nav=useNavigate(); const {profile}=useAuth(); const [data,setData]=useState<any>(null); const [modal,setModal]=useState<string|null>(null); const [text,setText]=useState(''); const [evidenceFile,setEvidenceFile]=useState<File|null>(null); const [busy,setBusy]=useState(false);
+ const {id}=useParams(); const nav=useNavigate(); const {profile}=useAuth(); const [data,setData]=useState<Awaited<ReturnType<typeof milestoneBundle>>|null>(null); const [modal,setModal]=useState<string|null>(null); const [text,setText]=useState(''); const [evidenceFile,setEvidenceFile]=useState<File|null>(null); const [busy,setBusy]=useState(false);
  async function load(){if(id)setData(await milestoneBundle(id))} useEffect(()=>{load()},[id]); if(!data)return <div className="splash"><div className="loader"/></div>;
  const m=data.milestone; const isOwner=profile?.id===m.owner_id; const isSecretary=profile&&['SECRETARY','ADMIN'].includes(profile.role); const isGS=profile&&['GS','ADMIN'].includes(profile.role);
  async function act(action:string,payload:any={}){setBusy(true);try{await workflow(action,{milestoneId:id,...payload});setModal(null);setText('');await load()}finally{setBusy(false)}}
