@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, BriefcaseBusiness, ClipboardCheck, FileText, Gauge, Gavel, HandHeart, Home, LogOut, Megaphone, Menu, Radar, RefreshCw, Target, UserRound, Users, X } from 'lucide-react';
+import { Bell, BriefcaseBusiness, ClipboardCheck, FileText, Gauge, Gavel, HandHeart, Home, LogOut, Megaphone, Menu, Network, Radar, RefreshCw, Target, UserRound, Users, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { signOut } from '../lib/auth';
@@ -15,6 +15,7 @@ const memberItems=[
 ];
 const workspaceItems=[
  {to:'/workspace',label:'الرئيسية',icon:Gauge,roles:['APPLICANT','MEMBER','SECRETARY','GS','PRESIDENT','ADMIN']},
+ {to:'/workspace/structure',label:'الهيكل والفريق',icon:Network,roles:['SECRETARY','GS','PRESIDENT','ADMIN']},
  {to:'/workspace/projects',label:'المشاريع',icon:Target,roles:['APPLICANT','MEMBER','SECRETARY','GS','PRESIDENT','ADMIN']},
  {to:'/workspace/routine',label:'العمل الدوري',icon:RefreshCw,roles:['APPLICANT','MEMBER','SECRETARY','GS','PRESIDENT','ADMIN']},
  {to:'/workspace/proposals',label:'المقترحات',icon:FileText,roles:['SECRETARY','GS','PRESIDENT','ADMIN']},
@@ -54,7 +55,7 @@ function WorkspaceShell(){
    <div className="workspace-sidebar-bottom"><button className="workspace-nav" onClick={async()=>{await signOut();nav('/login')}}><LogOut size={18}/>تسجيل الخروج</button></div>
   </aside>
   {open&&<div className="mobile-overlay" onClick={()=>setOpen(false)}/>} 
-  <main className="workspace-main"><header className="workspace-topbar"><button className="menu-btn" onClick={()=>setOpen(true)}><Menu/></button><div><strong>{pathname.startsWith('/workspace/projects')?'المشاريع':pathname.startsWith('/workspace/routine')?'العمل الدوري':pathname.startsWith('/workspace/proposals')?'المقترحات':pathname.startsWith('/workspace/reports')?'التقارير':'مساحة العمل'}</strong><span>متابعة مبكرة · مسؤولية واضحة · تدخل قبل التأخير</span></div><button className="workspace-home-chip" onClick={()=>nav('/')}><Home size={16}/>بوابة العضو</button></header><div className="workspace-page"><Outlet/></div></main>
+  <main className="workspace-main"><header className="workspace-topbar"><button className="menu-btn" onClick={()=>setOpen(true)}><Menu/></button><div><strong>{pathname.startsWith('/workspace/structure')?'الهيكل والفريق':pathname.startsWith('/workspace/projects')?'المشاريع':pathname.startsWith('/workspace/routine')?'العمل الدوري':pathname.startsWith('/workspace/proposals')?'المقترحات':pathname.startsWith('/workspace/reports')?'التقارير':'مساحة العمل'}</strong><span>متابعة مبكرة · مسؤولية واضحة · تدخل قبل التأخير</span></div><button className="workspace-home-chip" onClick={()=>nav('/')}><Home size={16}/>بوابة العضو</button></header><div className="workspace-page"><Outlet/></div></main>
  </div>
 }
 

@@ -25,6 +25,7 @@ import WorkspaceApprovalsPage from './pages/WorkspaceApprovalsPage';
 import WorkspaceOversightPage from './pages/WorkspaceOversightPage';
 import WorkspaceReportsPage from './pages/WorkspaceReportsPage';
 import WorkspaceRoutinePage from './pages/WorkspaceRoutinePage';
+import WorkspaceStructurePage from './pages/WorkspaceStructurePage';
 import MilestonePage from './pages/MilestonePage';
 
 function Guard({children}:{children:React.ReactNode}){const {session,profile,loading}=useAuth(); if(loading)return <div className="splash"><div className="loader"/><div>جارٍ تجهيز حسابك…</div></div>; if(!session)return <Navigate to="/login" replace/>; if(profile?.must_change_password)return <Navigate to="/change-password" replace/>; return <>{children}</>}
@@ -55,6 +56,7 @@ export default function App(){return <AuthProvider><Routes>
   <Route path="/workspace/milestones/:id" element={<WorkspaceOnly><MilestonePage/></WorkspaceOnly>}/>
   <Route path="/workspace/approvals" element={<SecretaryOrAbove><WorkspaceApprovalsPage/></SecretaryOrAbove>}/>
   <Route path="/workspace/routine" element={<WorkspaceOnly><WorkspaceRoutinePage/></WorkspaceOnly>}/>
+  <Route path="/workspace/structure" element={<SecretaryOrAbove><WorkspaceStructurePage/></SecretaryOrAbove>}/>
   <Route path="/workspace/reports" element={<SecretaryOrAbove><WorkspaceReportsPage/></SecretaryOrAbove>}/>
   <Route path="/workspace/weekly" element={<Navigate to="/workspace/reports" replace/>}/>
   <Route path="/workspace/oversight" element={<OversightOnly><WorkspaceOversightPage/></OversightOnly>}/>

@@ -95,6 +95,12 @@ async function insertTemplateMilestones(db:any,profile:any,init:any,result:any,i
  }
  return created;
 }
+
+async function getOrgBody(db:any,id:string){const {data,error}=await db.from('org_bodies').select('*').eq('id',id).single();if(error)throw error;return data}
+async function getOrgPosition(db:any,id:string){const {data,error}=await db.from('org_positions').select('*').eq('id',id).single();if(error)throw error;return data}
+function canManageOrg(profile:any,secretariatId:string){return profile.role==='ADMIN'||(profile.role==='SECRETARY'&&profile.secretariat_id===secretariatId)}
+async function ensureOrgSupervisorPosition(db:any,secretariatId:string,positionId?:string|null){if(!positionId)return null;const p=await getOrgPosition(db,positionId);if(p.secretariat_id!==secretariatId||p.body_id!==null||p.status!=='ACTIVE')throw new Error('جهة الإشراف المختارة غير صالحة.');return p}
+
 async function createTemplateSpecialPermissions(db:any,profile:any,init:any,items:any[]){
  const created:any[]=[];
  for(const item of items||[]){if(!String(item?.title||'').trim())continue;const scope=item.scopeType||'OWN_SECRETARIAT';if(scope==='CROSS_SECRETARIAT'&&!item.targetSecretariatId)throw new Error('حدد السكرتارية صاحبة الاختصاص للصلاحية الإضافية.');
@@ -320,6 +326,62 @@ Deno.serve(async(req)=>{
    const v=(await db.from('proposal_versions').select('*').eq('proposal_id',p.id).eq('version_no',p.current_version).single()).data;if(!v)throw new Error('نسخة المقترح غير موجودة.');
    if(v.pdf_drive_file_id)return json({ok:true,alreadyReady:true});
    await queueProposalArtifacts(db,p,p.current_version);await audit(db,profile,'PROPOSAL_DOCUMENT_RETRY','PROPOSAL',p.id,null,{version:p.current_version});return json({ok:true});
+  }
+
+
+  if(actionName==='ORG_BODY_CREATE'){
+   const sid=profile.role==='ADMIN'?payload.secretariatId:profile.secretariat_id;if(!sid||!canManageOrg(profile,sid))throw new Error('غير مسموح.');
+   const name=String(payload.name||'').trim();if(!name)throw new Error('اكتب اسم الجسم التنظيمي.');
+   const bodyType=['OFFICE','COMMITTEE','COUNCIL','CLUB','LIBRARY','TEAM','UNIT','OTHER'].includes(payload.bodyType)?payload.bodyType:'OFFICE';
+   const nature=payload.nature==='TEMPORARY'?'TEMPORARY':'ONGOING';let parentBodyId=payload.parentBodyId||null;
+   if(parentBodyId){const parent=await getOrgBody(db,parentBodyId);if(parent.secretariat_id!==sid)throw new Error('الجسم الأب يجب أن يكون من نفس السكرتارية.');}
+   const supervisor=await ensureOrgSupervisorPosition(db,sid,payload.supervisorPositionId||null);
+   const r=await db.from('org_bodies').insert({secretariat_id:sid,parent_body_id:parentBodyId,name,body_type:bodyType,purpose:payload.purpose||null,nature,supervisor_position_id:supervisor?.id||null,created_by:profile.id}).select().single();if(r.error)throw r.error;
+   await audit(db,profile,'ORG_BODY_CREATE','ORG_BODY',r.data.id,null,r.data);return json({ok:true,body:r.data});
+  }
+  if(actionName==='ORG_BODY_UPDATE'){
+   const b=await getOrgBody(db,payload.bodyId);if(!canManageOrg(profile,b.secretariat_id))throw new Error('غير مسموح.');
+   const patch:any={};if(payload.name!==undefined){const n=String(payload.name||'').trim();if(!n)throw new Error('اسم الجسم مطلوب.');patch.name=n}if(payload.purpose!==undefined)patch.purpose=payload.purpose||null;
+   if(payload.bodyType!==undefined&&['OFFICE','COMMITTEE','COUNCIL','CLUB','LIBRARY','TEAM','UNIT','OTHER'].includes(payload.bodyType))patch.body_type=payload.bodyType;
+   if(payload.nature!==undefined)patch.nature=payload.nature==='TEMPORARY'?'TEMPORARY':'ONGOING';
+   if(payload.parentBodyId!==undefined){if(payload.parentBodyId===b.id)throw new Error('لا يمكن أن يتبع الجسم نفسه.');if(payload.parentBodyId){const parent=await getOrgBody(db,payload.parentBodyId);if(parent.secretariat_id!==b.secretariat_id)throw new Error('الجسم الأب يجب أن يكون من نفس السكرتارية.');}patch.parent_body_id=payload.parentBodyId||null}
+   if(payload.supervisorPositionId!==undefined){const sp=await ensureOrgSupervisorPosition(db,b.secretariat_id,payload.supervisorPositionId||null);patch.supervisor_position_id=sp?.id||null}
+   const u=await db.from('org_bodies').update(patch).eq('id',b.id).select().single();if(u.error)throw u.error;await audit(db,profile,'ORG_BODY_UPDATE','ORG_BODY',b.id,b,u.data);return json({ok:true,body:u.data});
+  }
+  if(actionName==='ORG_BODY_STATUS'){
+   const b=await getOrgBody(db,payload.bodyId);if(!canManageOrg(profile,b.secretariat_id))throw new Error('غير مسموح.');const status=payload.status==='FROZEN'?'FROZEN':'ACTIVE';
+   if(status==='FROZEN'&&!String(payload.reason||'').trim())throw new Error('اكتب سبب التجميد باختصار.');
+   const patch:any={status,frozen_at:status==='FROZEN'?new Date().toISOString():null,frozen_reason:status==='FROZEN'?String(payload.reason).trim():null,end_at:null};
+   const u=await db.from('org_bodies').update(patch).eq('id',b.id).select().single();if(u.error)throw u.error;await audit(db,profile,status==='FROZEN'?'ORG_BODY_FREEZE':'ORG_BODY_REACTIVATE','ORG_BODY',b.id,b,u.data,{reason:payload.reason||null});return json({ok:true,body:u.data});
+  }
+  if(actionName==='ORG_POSITION_CREATE'){
+   let sid=profile.role==='ADMIN'?payload.secretariatId:profile.secretariat_id;let bodyId=payload.bodyId||null;if(bodyId){const b=await getOrgBody(db,bodyId);sid=b.secretariat_id;}if(!sid||!canManageOrg(profile,sid))throw new Error('غير مسموح.');
+   const title=String(payload.title||'').trim();if(!title)throw new Error('اكتب اسم المنصب.');const kind=['HEAD','DEPUT','COORDINATOR','SECRETARY','RAPPORTEUR','OTHER'].includes(payload.positionKind)?payload.positionKind:'OTHER';
+   const r=await db.from('org_positions').insert({secretariat_id:sid,body_id:bodyId,title,position_kind:kind,scope_label:payload.scopeLabel||null,created_by:profile.id}).select().single();if(r.error)throw r.error;await audit(db,profile,'ORG_POSITION_CREATE','ORG_POSITION',r.data.id,null,r.data);return json({ok:true,position:r.data});
+  }
+  if(actionName==='ORG_POSITION_UPDATE'){
+   const pos=await getOrgPosition(db,payload.positionId);if(!canManageOrg(profile,pos.secretariat_id))throw new Error('غير مسموح.');const patch:any={};if(payload.title!==undefined){const t=String(payload.title||'').trim();if(!t)throw new Error('اسم المنصب مطلوب.');patch.title=t}if(payload.scopeLabel!==undefined)patch.scope_label=payload.scopeLabel||null;if(payload.positionKind!==undefined&&['HEAD','DEPUT','COORDINATOR','SECRETARY','RAPPORTEUR','OTHER'].includes(payload.positionKind))patch.position_kind=payload.positionKind;
+   const u=await db.from('org_positions').update(patch).eq('id',pos.id).select().single();if(u.error)throw u.error;await audit(db,profile,'ORG_POSITION_UPDATE','ORG_POSITION',pos.id,pos,u.data);return json({ok:true,position:u.data});
+  }
+  if(actionName==='ORG_APPOINTMENT_SET'){
+   const pos=await getOrgPosition(db,payload.positionId);if(!canManageOrg(profile,pos.secretariat_id))throw new Error('غير مسموح.');const person=(await db.from('profiles').select('id,full_name,active').eq('id',payload.profileId).single()).data;if(!person?.active)throw new Error('اختر عضوًا فعّالًا.');
+   const type=['PRIMARY','ACTING','INTERIM'].includes(payload.appointmentType)?payload.appointmentType:'PRIMARY';const start=isoDate(payload.startAt)||new Date().toISOString();const end=payload.endAt?isoDate(payload.endAt):null;if(end&&new Date(end)<=new Date(start))throw new Error('نهاية التكليف يجب أن تكون بعد بدايته.');
+   if(type==='PRIMARY')await db.from('org_appointments').update({status:'ENDED',end_at:start}).eq('position_id',pos.id).eq('status','ACTIVE').eq('appointment_type','PRIMARY');
+   const r=await db.from('org_appointments').insert({position_id:pos.id,profile_id:person.id,appointment_type:type,start_at:start,end_at:end,status:'ACTIVE',note:payload.note||null,created_by:profile.id}).select().single();if(r.error)throw r.error;
+   if(pos.body_id){const exists=(await db.from('org_memberships').select('id').eq('body_id',pos.body_id).eq('profile_id',person.id).eq('status','ACTIVE').maybeSingle()).data;if(!exists)await db.from('org_memberships').insert({body_id:pos.body_id,profile_id:person.id,membership_label:pos.title,status:'ACTIVE',start_at:start,created_by:profile.id});}
+   await audit(db,profile,'ORG_APPOINTMENT_SET','ORG_POSITION',pos.id,null,r.data,{person:person.full_name});return json({ok:true,appointment:r.data});
+  }
+  if(actionName==='ORG_APPOINTMENT_END'){
+   const a=(await db.from('org_appointments').select('*,position:org_positions(*)').eq('id',payload.appointmentId).single()).data;if(!a||!canManageOrg(profile,a.position.secretariat_id))throw new Error('غير مسموح.');const u=await db.from('org_appointments').update({status:'ENDED',end_at:new Date().toISOString(),note:payload.note||a.note}).eq('id',a.id).select().single();if(u.error)throw u.error;await audit(db,profile,'ORG_APPOINTMENT_END','ORG_POSITION',a.position_id,a,u.data);return json({ok:true});
+  }
+  if(actionName==='ORG_MEMBER_ADD'){
+   const b=await getOrgBody(db,payload.bodyId);if(!canManageOrg(profile,b.secretariat_id))throw new Error('غير مسموح.');const person=(await db.from('profiles').select('id,full_name,active').eq('id',payload.profileId).single()).data;if(!person?.active)throw new Error('اختر عضوًا فعّالًا.');const existing=(await db.from('org_memberships').select('*').eq('body_id',b.id).eq('profile_id',person.id).eq('status','ACTIVE').maybeSingle()).data;if(existing)return json({ok:true,membership:existing});const r=await db.from('org_memberships').insert({body_id:b.id,profile_id:person.id,membership_label:String(payload.label||'عضو').trim()||'عضو',start_at:isoDate(payload.startAt)||new Date().toISOString(),note:payload.note||null,created_by:profile.id}).select().single();if(r.error)throw r.error;await audit(db,profile,'ORG_MEMBER_ADD','ORG_BODY',b.id,null,r.data,{person:person.full_name});return json({ok:true,membership:r.data});
+  }
+  if(actionName==='ORG_MEMBER_END'){
+   const m=(await db.from('org_memberships').select('*,body:org_bodies(*)').eq('id',payload.membershipId).single()).data;if(!m||!canManageOrg(profile,m.body.secretariat_id))throw new Error('غير مسموح.');const u=await db.from('org_memberships').update({status:'ENDED',end_at:new Date().toISOString(),note:payload.note||m.note}).eq('id',m.id).select().single();if(u.error)throw u.error;await audit(db,profile,'ORG_MEMBER_END','ORG_BODY',m.body_id,m,u.data);return json({ok:true});
+  }
+  if(actionName==='ORG_SUPERVISION_SET'){
+   const b=await getOrgBody(db,payload.bodyId);if(!canManageOrg(profile,b.secretariat_id))throw new Error('غير مسموح.');const sp=await ensureOrgSupervisorPosition(db,b.secretariat_id,payload.supervisorPositionId||null);const u=await db.from('org_bodies').update({supervisor_position_id:sp?.id||null}).eq('id',b.id).select().single();if(u.error)throw u.error;await audit(db,profile,'ORG_SUPERVISION_SET','ORG_BODY',b.id,b,u.data);return json({ok:true,body:u.data});
   }
 
   if(actionName==='ROUTINE_CREATE'){

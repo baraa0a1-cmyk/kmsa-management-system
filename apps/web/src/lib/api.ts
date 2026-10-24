@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import type { Blocker, Evidence, Initiative, Intervention, MemberDirectoryItem, Milestone, Plan, Profile, ProjectBundle, ProjectIntervention, ProjectPermission, ProjectPermissionApproval, ProjectSheetRow, ProjectUpdate, Proposal, ProposalDocumentStatus, ProposalSheetRow, ResultItem, RoutineObligationRow, Secretariat, WeeklyCommitment } from './types';
+import type { Blocker, Evidence, Initiative, Intervention, MemberDirectoryItem, Milestone, Plan, Profile, ProjectBundle, ProjectIntervention, ProjectPermission, ProjectPermissionApproval, ProjectSheetRow, ProjectUpdate, Proposal, ProposalDocumentStatus, ProposalSheetRow, ResultItem, RoutineObligationRow, Secretariat, WeeklyCommitment, OrgStructureSnapshot } from './types';
 
 export async function currentProfile(): Promise<Profile> {
   const { data: auth } = await supabase.auth.getUser();
@@ -99,6 +99,12 @@ export async function proposalTrackingSheet(): Promise<ProposalSheetRow[]> {
 export async function routineObligationSheet(): Promise<RoutineObligationRow[]> {
   const {data,error}=await supabase.rpc('routine_obligation_sheet'); if(error)throw error; return (data||[]) as RoutineObligationRow[];
 }
+
+export async function organizationStructure(secretariatId?:string): Promise<OrgStructureSnapshot> {
+  const {data,error}=await supabase.rpc('org_structure_snapshot',{p_secretariat_id:secretariatId||null});
+  if(error)throw error; return data as OrgStructureSnapshot;
+}
+
 export async function proposalDocumentStatus(proposalId:string): Promise<ProposalDocumentStatus> {
   const {data,error}=await supabase.rpc('proposal_document_status',{p_proposal_id:proposalId}); if(error)throw error; return (data||{}) as ProposalDocumentStatus;
 }

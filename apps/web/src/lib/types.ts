@@ -84,3 +84,12 @@ export interface RoutineObligationRow {
 export interface ProposalDocumentStatus {
   pdfReady:boolean; pdfDriveFileId:string|null; docxDriveFileId:string|null; jobStatus:string; lastError:string|null; attempts:number; updatedAt:string|null;
 }
+
+export type OrgBodyType='OFFICE'|'COMMITTEE'|'COUNCIL'|'CLUB'|'LIBRARY'|'TEAM'|'UNIT'|'OTHER';
+export type OrgBodyStatus='ACTIVE'|'FROZEN';
+export interface OrgBody { id:string; secretariat_id:string; parent_body_id:string|null; name:string; body_type:OrgBodyType; purpose:string|null; nature:'ONGOING'|'TEMPORARY'; status:OrgBodyStatus; start_at:string; end_at:string|null; supervisor_position_id:string|null; frozen_at:string|null; frozen_reason:string|null; created_at:string; updated_at:string; }
+export interface OrgPosition { id:string; secretariat_id:string; body_id:string|null; title:string; position_kind:'HEAD'|'DEPUT'|'COORDINATOR'|'SECRETARY'|'RAPPORTEUR'|'OTHER'; scope_label:string|null; status:'ACTIVE'|'FROZEN'; created_at:string; updated_at:string; }
+export interface OrgPersonLite { id:string; full_name:string; university_id:string|null; email:string; }
+export interface OrgAppointment { id:string; position_id:string; profile_id:string; appointment_type:'PRIMARY'|'ACTING'|'INTERIM'; status:'ACTIVE'|'ENDED'; start_at:string; end_at:string|null; note:string|null; profile:OrgPersonLite; }
+export interface OrgMembership { id:string; body_id:string; profile_id:string; membership_label:string; status:'ACTIVE'|'ENDED'; start_at:string; end_at:string|null; note:string|null; profile:OrgPersonLite; }
+export interface OrgStructureSnapshot { secretariat:Secretariat; secretary:Pick<Profile,'id'|'full_name'|'university_id'>|null; bodies:OrgBody[]; positions:OrgPosition[]; appointments:OrgAppointment[]; memberships:OrgMembership[]; }
