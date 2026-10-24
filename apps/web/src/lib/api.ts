@@ -1,10 +1,10 @@
 import { supabase } from './supabase';
-import type { Blocker, Evidence, Initiative, Intervention, Milestone, Plan, Profile, ProjectBundle, ProjectIntervention, ProjectPermission, ProjectPermissionApproval, ProjectUpdate, Proposal, ResultItem, Secretariat, WeeklyCommitment } from './types';
+import type { Blocker, Evidence, Initiative, Intervention, MemberDirectoryItem, Milestone, Plan, Profile, ProjectBundle, ProjectIntervention, ProjectPermission, ProjectPermissionApproval, ProjectSheetRow, ProjectUpdate, Proposal, ProposalSheetRow, ResultItem, Secretariat, WeeklyCommitment } from './types';
 
 export async function currentProfile(): Promise<Profile> {
   const { data: auth } = await supabase.auth.getUser();
   if (!auth.user) throw new Error('UNAUTHORIZED');
-  const { data, error } = await supabase.from('profiles').select('*').eq('auth_user_id', auth.user.id).single();
+  const { data, error } = await supabase.from('profiles').select('*,secretariat:secretariats(*)').eq('auth_user_id', auth.user.id).single();
   if (error) throw error; return data;
 }
 export async function secretariats(): Promise<Secretariat[]> {
@@ -64,7 +64,7 @@ export async function workspaceProject(id:string): Promise<ProjectBundle> {
   const [i,r,m,u,p,pi,b,o]=await Promise.all([
     supabase.from('initiatives').select('*,secretariat:secretariats(*),owner:profiles!initiatives_owner_id_fkey(id,full_name),secretary:profiles!initiatives_secretary_id_fkey(id,full_name)').eq('id',id).single(),
     supabase.from('results').select('*,owner:profiles!results_owner_id_fkey(id,full_name)').eq('initiative_id',id).order('created_at'),
-    supabase.from('milestones').select('*,owner:profiles!milestones_owner_id_fkey(id,full_name),result:results(*)').order('due_at'),
+    supabase.from('milestones').select('*,owner:profiles!milestones_owner_id_fkey(id,full_name),result:results(*)').order('sequence_no').order('due_at'),
     supabase.from('project_updates').select('*,author:profiles(full_name)').eq('initiative_id',id).order('created_at',{ascending:false}),
     supabase.from('project_permissions').select('*,target_secretariat:secretariats!project_permissions_target_secretariat_id_fkey(*),requester:profiles!project_permissions_requested_by_fkey(id,full_name),approvals:project_permission_approvals(*)').eq('initiative_id',id).order('created_at'),
     supabase.from('project_interventions').select('*,secretary:profiles!project_interventions_secretary_id_fkey(id,full_name)').eq('initiative_id',id).order('created_at',{ascending:false}),
@@ -84,6 +84,27 @@ export async function staffProfiles(secretariatId?:string): Promise<Profile[]> {
   let q=supabase.from('profiles').select('*').eq('active',true).in('role',['MEMBER','SECRETARY']);if(secretariatId)q=q.eq('secretariat_id',secretariatId);const {data,error}=await q.order('full_name');if(error)throw error;return (data||[]) as Profile[];
 }
 export async function executiveSnapshot(){const {data,error}=await supabase.rpc('executive_workspace_snapshot');if(error)throw error;return data||{};}
+
+
+export async function memberDirectorySearch(query=''): Promise<MemberDirectoryItem[]> {
+  const {data,error}=await supabase.rpc('member_directory_search',{p_query:query}); if(error)throw error; return (data||[]) as MemberDirectoryItem[];
+}
+export async function workspaceProjectSheet(): Promise<ProjectSheetRow[]> {
+  const {data,error}=await supabase.rpc('workspace_project_sheet'); if(error)throw error; return (data||[]) as ProjectSheetRow[];
+}
+export async function proposalTrackingSheet(): Promise<ProposalSheetRow[]> {
+  const {data,error}=await supabase.rpc('proposal_tracking_sheet'); if(error)throw error; return (data||[]) as ProposalSheetRow[];
+}
+export function exportCsv(fileName:string, rows:Record<string,any>[], columns:{key:string;label:string}[]){
+  const esc=(v:any)=>`"${String(v??'').replace(/"/g,'""')}"`;
+  const lines=[columns.map(c=>esc(c.label)).join(','),...rows.map(r=>columns.map(c=>esc(r[c.key])).join(','))];
+  const blob=new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv;charset=utf-8;'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=fileName.endsWith('.csv')?fileName:fileName+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+export async function copyTableTsv(rows:Record<string,any>[], columns:{key:string;label:string}[]){
+  const clean=(v:any)=>String(v??'').replace(/[\t\r\n]+/g,' ').trim();
+  const text=[columns.map(c=>clean(c.label)).join('\t'),...rows.map(r=>columns.map(c=>clean(r[c.key])).join('\t'))].join('\n');
+  await navigator.clipboard.writeText(text);return rows.length;
+}
 
 export async function weeklyReport(weekStart?:string) {
   const { data,error }=await supabase.rpc('weekly_report',{p_week_start:weekStart||null}); if(error) throw error; return data||[];

@@ -19,6 +19,7 @@ import UsersPage from './pages/UsersPage';
 import PasswordChangePage from './pages/PasswordChangePage';
 import WorkspaceHomePage from './pages/WorkspaceHomePage';
 import WorkspaceProjectsPage from './pages/WorkspaceProjectsPage';
+import WorkspaceProjectCreatePage from './pages/WorkspaceProjectCreatePage';
 import WorkspaceProjectPage from './pages/WorkspaceProjectPage';
 import WorkspaceApprovalsPage from './pages/WorkspaceApprovalsPage';
 import WorkspaceOversightPage from './pages/WorkspaceOversightPage';
@@ -27,7 +28,7 @@ import MilestonePage from './pages/MilestonePage';
 
 function Guard({children}:{children:React.ReactNode}){const {session,profile,loading}=useAuth(); if(loading)return <div className="splash"><div className="loader"/><div>جارٍ تجهيز حسابك…</div></div>; if(!session)return <Navigate to="/login" replace/>; if(profile?.must_change_password)return <Navigate to="/change-password" replace/>; return <>{children}</>}
 function LoginGuard(){const {session,loading}=useAuth();if(loading)return <div className="splash"><div className="loader"/></div>;return session?<Navigate to="/" replace/>:<LoginPage/>}
-function WorkspaceOnly({children}:{children:React.ReactNode}){const {profile}=useAuth();return profile&&['MEMBER','SECRETARY','GS','PRESIDENT','ADMIN'].includes(profile.role)?<>{children}</>:<Navigate to="/" replace/>}
+function WorkspaceOnly({children}:{children:React.ReactNode}){const {profile}=useAuth();return profile?<>{children}</>:<Navigate to="/" replace/>}
 function SecretaryOrAbove({children}:{children:React.ReactNode}){const {profile}=useAuth();return profile&&['SECRETARY','GS','PRESIDENT','ADMIN'].includes(profile.role)?<>{children}</>:<Navigate to="/workspace" replace/>}
 function OversightOnly({children}:{children:React.ReactNode}){const {profile}=useAuth();return profile&&['GS','PRESIDENT','ADMIN'].includes(profile.role)?<>{children}</>:<Navigate to="/workspace" replace/>}
 function AdminOnly({children}:{children:React.ReactNode}){const {profile}=useAuth();return profile?.role==='ADMIN'?<>{children}</>:<Navigate to="/workspace" replace/>}
@@ -47,9 +48,10 @@ export default function App(){return <AuthProvider><Routes>
 
   <Route path="/workspace" element={<WorkspaceOnly><WorkspaceHomePage/></WorkspaceOnly>}/>
   <Route path="/workspace/projects" element={<WorkspaceOnly><WorkspaceProjectsPage/></WorkspaceOnly>}/>
+  <Route path="/workspace/projects/new" element={<SecretaryOrAbove><WorkspaceProjectCreatePage/></SecretaryOrAbove>}/><Route path="/workspace/projects/:id/edit" element={<SecretaryOrAbove><WorkspaceProjectCreatePage/></SecretaryOrAbove>}/>
   <Route path="/workspace/projects/:id" element={<WorkspaceOnly><WorkspaceProjectPage/></WorkspaceOnly>}/>
   <Route path="/workspace/milestones/:id" element={<WorkspaceOnly><MilestonePage/></WorkspaceOnly>}/>
-  <Route path="/workspace/approvals" element={<WorkspaceOnly><WorkspaceApprovalsPage/></WorkspaceOnly>}/>
+  <Route path="/workspace/approvals" element={<SecretaryOrAbove><WorkspaceApprovalsPage/></SecretaryOrAbove>}/>
   <Route path="/workspace/weekly" element={<SecretaryOrAbove><WorkspaceWeeklyPage/></SecretaryOrAbove>}/>
   <Route path="/workspace/oversight" element={<OversightOnly><WorkspaceOversightPage/></OversightOnly>}/>
   <Route path="/workspace/proposals" element={<SecretaryOrAbove><WorkspaceProposalsPage/></SecretaryOrAbove>}/>

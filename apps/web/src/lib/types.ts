@@ -3,7 +3,7 @@ export type ProposalStatus = 'DRAFT' | 'WITH_SECRETARY' | 'REVISION_REQUESTED' |
 export type ExecutionStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'AT_RISK' | 'BLOCKED' | 'COMPLETED' | 'CANCELLED';
 export type MilestoneStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'AT_RISK' | 'BLOCKED' | 'READY_FOR_VERIFICATION' | 'VERIFIED' | 'CANCELLED';
 export type ProjectHealth = 'ON_TRACK' | 'WATCH' | 'AT_RISK' | 'BLOCKED';
-export type ProjectSetupStatus = 'AWAITING_SETUP' | 'AWAITING_LEAD' | 'CO_DESIGN' | 'ACTIVE';
+export type ProjectSetupStatus = 'AWAITING_SETUP' | 'AWAITING_GS_APPROVAL' | 'ACTIVE';
 
 export interface Profile {
   id: string;
@@ -15,6 +15,7 @@ export interface Profile {
   secretariat_id: string | null;
   active: boolean;
   must_change_password: boolean;
+  secretariat?: Secretariat | null;
 }
 
 export interface Secretariat { id: string; code: string; name_ar: string; active: boolean; }
@@ -35,14 +36,14 @@ export interface Plan { id: string; title: string; cycle_id: string; secretariat
 export interface Initiative {
   id: string; plan_id: string | null; proposal_id: string | null; title: string; objective: string | null;
   owner_id: string; secretary_id: string | null; secretariat_id: string; status: string; source_type: string;
-  setup_status: ProjectSetupStatus | string; health: ProjectHealth; target_due_at: string | null; activated_at: string | null;
+  setup_status: ProjectSetupStatus | string; approval_status?: 'DRAFT'|'PENDING_GS'|'APPROVED'|'RETURNED'|string; gs_review_note?: string|null; gs_approved_at?: string|null; assignment_start_at?: string|null; health: ProjectHealth; target_due_at: string | null; activated_at: string | null;
   last_update_at: string | null; completed_at: string | null; created_at?: string; updated_at?: string;
   owner?: Pick<Profile,'id'|'full_name'>; secretary?: Pick<Profile,'id'|'full_name'>; secretariat?: Secretariat;
 }
 export interface ResultItem { id: string; initiative_id: string; statement: string; success_measure: string | null; owner_id: string | null; due_at: string | null; assignment_status?: string; assignment_feedback?: string | null; accepted_at?: string | null; completed_at?: string | null; owner?: Pick<Profile,'id'|'full_name'>; }
 export interface Milestone {
   id: string; result_id: string; title: string; description: string | null; owner_id: string; due_at: string;
-  status: MilestoneStatus; priority: string; verification_criteria: string; verified_at: string | null; design_status?: string;
+  status: MilestoneStatus; priority: string; verification_criteria: string; verified_at: string | null; design_status?: string; sequence_no?: number|null; deadline_mode?: 'ABSOLUTE'|'RELATIVE'|string; relative_days?: number|null; relative_to_milestone_id?: string|null; outcome_text?: string|null; lead_note?: string|null; secretary_note?: string|null; status_updated_at?: string|null;
   result?: ResultItem; owner?: Pick<Profile,'id'|'full_name'>;
 }
 export interface WeeklyCommitment { id: string; milestone_id: string; week_start: string; commitment_text: string; target_at: string | null; status: string; owner_id: string; }
@@ -56,3 +57,19 @@ export interface ProjectPermissionApproval { id:string; permission_id:string; ap
 export interface ProjectPermission { id:string; initiative_id:string; permission_key:string|null; title:string; description:string|null; permission_type:'STANDARD'|'SPECIAL'; scope_type:'OWN_SECRETARIAT'|'CROSS_SECRETARIAT'|'EXECUTIVE_COMMITTEE'; target_secretariat_id:string|null; requested_by:string|null; requested_for:string; rationale:string|null; status:'PENDING'|'ACTIVE'|'REJECTED'|'REVOKED'; decided_by:string|null; decision_id:string|null; valid_until:string|null; created_at:string; target_secretariat?:Secretariat; requester?:Pick<Profile,'id'|'full_name'>; initiative?:Partial<Initiative>; approvals?:ProjectPermissionApproval[]; }
 export interface ProjectIntervention { id:string; initiative_id:string; result_id:string|null; milestone_id:string|null; secretary_id:string; trigger_type:string; reason:string|null; action_text:string; due_at:string|null; status:'OPEN'|'CLOSED'; created_at:string; closed_at:string|null; secretary?:Pick<Profile,'id'|'full_name'>; }
 export interface ProjectBundle { initiative:Initiative; results:ResultItem[]; milestones:Milestone[]; updates:ProjectUpdate[]; permissions:ProjectPermission[]; interventions:ProjectIntervention[]; blockers:Blocker[]; oversight:any[]; }
+
+
+export interface ProjectSheetRow {
+  project_id:string; secretariat_id:string; secretariat_name:string; project_title:string; approval_status:string; setup_status:string;
+  project_status:string; health:string; lead_id:string; lead_name:string; secretary_id:string|null; secretary_name:string|null;
+  result_statement:string|null; success_measure:string|null; assignment_start_at:string|null; target_due_at:string|null;
+  total_milestones:number; verified_milestones:number; current_milestone:string|null; current_milestone_due_at:string|null;
+  current_milestone_status:string|null; current_milestone_overdue:boolean; days_to_current_milestone:number|null; last_lead_note:string|null; last_lead_update_at:string|null; last_intervention:string|null;
+  last_intervention_at:string|null; open_blockers:number; pending_special_permissions:number; needs_attention:boolean;
+}
+export interface ProposalSheetRow {
+  proposal_id:string; internal_id:string; title:string; applicant_name:string; secretariat_id:string; secretariat_name:string;
+  status:string; execution_status:string; submitted_at:string|null; updated_at:string; stage_due_at:string|null; overdue:boolean;
+  days_in_current_stage:number; current_version:number; current_pdf_drive_file_id:string|null;
+}
+export interface MemberDirectoryItem { id:string; full_name:string; university_id:string|null; email:string; }
