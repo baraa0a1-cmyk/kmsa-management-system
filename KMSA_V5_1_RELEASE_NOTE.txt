@@ -1,0 +1,3 @@
+KMSA v5.1 — ترقية جدول متابعة محطات المشاريع
+ابدأ بقراءة docs/INSTALL_FOLLOWUP_V5_1_AR.md.
+يجب تنفيذ SQL وترقية workflow وdocument-job قبل رفع الواجهة.

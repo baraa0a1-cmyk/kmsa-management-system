@@ -61,19 +61,28 @@ export async function workspaceProjects(): Promise<Initiative[]> {
   if(error) throw error; return (data||[]) as Initiative[];
 }
 export async function workspaceProject(id:string): Promise<ProjectBundle> {
-  const [i,r,m,u,p,pi,b,o]=await Promise.all([
+  // First locate this project's results; then load only its milestones/evidence.
+  // A secretary must not download the association's entire activity ledger to open one project.
+  const [i,r,u,p,pi,o,a]=await Promise.all([
     supabase.from('initiatives').select('*,secretariat:secretariats(*),owner:profiles!initiatives_owner_id_fkey(id,full_name),secretary:profiles!initiatives_secretary_id_fkey(id,full_name)').eq('id',id).single(),
     supabase.from('results').select('*,owner:profiles!results_owner_id_fkey(id,full_name)').eq('initiative_id',id).order('created_at'),
-    supabase.from('milestones').select('*,owner:profiles!milestones_owner_id_fkey(id,full_name),result:results(*)').order('sequence_no').order('due_at'),
     supabase.from('project_updates').select('*,author:profiles(full_name)').eq('initiative_id',id).order('created_at',{ascending:false}),
     supabase.from('project_permissions').select('*,target_secretariat:secretariats!project_permissions_target_secretariat_id_fkey(*),requester:profiles!project_permissions_requested_by_fkey(id,full_name),approvals:project_permission_approvals(*)').eq('initiative_id',id).order('created_at'),
     supabase.from('project_interventions').select('*,secretary:profiles!project_interventions_secretary_id_fkey(id,full_name)').eq('initiative_id',id).order('created_at',{ascending:false}),
-    supabase.from('blockers').select('*').eq('status','OPEN').order('created_at',{ascending:false}),
-    supabase.from('oversight_notes').select('*,creator:profiles!oversight_notes_created_by_fkey(id,full_name)').eq('initiative_id',id).order('created_at',{ascending:false})
+    supabase.from('oversight_notes').select('*,creator:profiles!oversight_notes_created_by_fkey(id,full_name)').eq('initiative_id',id).order('created_at',{ascending:false}),
+    supabase.from('project_activity_entries').select('*,author:profiles!project_activity_entries_author_id_fkey(id,full_name)').eq('initiative_id',id).order('created_at',{ascending:false})
   ]);
-  for(const x of [i,r,m,u,p,pi,b,o]) if(x.error) throw x.error;
-  const resultIds=(r.data||[]).map((x:any)=>x.id); const projectMilestones=(m.data||[]).filter((x:any)=>resultIds.includes(x.result_id)); const milestoneIds=projectMilestones.map((x:any)=>x.id); const blockers=(b.data||[]).filter((x:any)=>milestoneIds.includes(x.milestone_id));
-  return {initiative:i.data as Initiative,results:(r.data||[]) as ResultItem[],milestones:projectMilestones as Milestone[],updates:(u.data||[]) as ProjectUpdate[],permissions:(p.data||[]) as ProjectPermission[],interventions:(pi.data||[]) as ProjectIntervention[],blockers,oversight:o.data||[]};
+  for(const x of [i,r,u,p,pi,o,a]) if(x.error)throw x.error;
+  const resultIds=(r.data||[]).map((x:any)=>x.id);
+  const m=resultIds.length?await supabase.from('milestones').select('*,owner:profiles!milestones_owner_id_fkey(id,full_name),result:results(*)').in('result_id',resultIds).order('sequence_no').order('due_at'):{data:[],error:null};
+  if(m.error)throw m.error;
+  const milestoneIds=(m.data||[]).map((x:any)=>x.id);
+  const [b,e]=await Promise.all([
+    milestoneIds.length?supabase.from('blockers').select('*').in('milestone_id',milestoneIds).eq('status','OPEN').order('created_at',{ascending:false}):Promise.resolve({data:[],error:null}),
+    milestoneIds.length?supabase.from('milestone_evidence').select('*').in('milestone_id',milestoneIds).order('created_at',{ascending:false}):Promise.resolve({data:[],error:null})
+  ]);
+  if(b.error)throw b.error;if(e.error)throw e.error;
+  return {initiative:i.data as Initiative,results:(r.data||[]) as ResultItem[],milestones:(m.data||[]) as Milestone[],updates:(u.data||[]) as ProjectUpdate[],permissions:(p.data||[]) as ProjectPermission[],interventions:(pi.data||[]) as ProjectIntervention[],blockers:(b.data||[]) as Blocker[],oversight:o.data||[],activity:a.data||[],evidence:(e.data||[]) as Evidence[]};
 }
 export async function projectPermissionsPending(): Promise<(ProjectPermissionApproval & {permission:ProjectPermission})[]> {
   const {data,error}=await supabase.rpc('permission_approval_queue');if(error)throw error;return (data||[]) as any;
