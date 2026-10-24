@@ -1,46 +1,64 @@
-# ما الذي تتضمنه هذه النسخة؟
+# ما الذي تتضمنه v4؟
 
-## الهوية
+## المبدأ
+
+النظام يتابع العمل، ولا يحاول أن يحاكي هيكل الرابطة بالكامل داخل قاعدة البيانات.
+
+## بوابة العضو
 - دخول بالبريد أو الرقم الجامعي + كلمة السر.
-- أدوار APPLICANT / MEMBER / SECRETARY / GS / PRESIDENT / ADMIN.
-- إجبار الحسابات المستوردة على تغيير كلمة المرور أول مرة.
+- الرئيسية، الفرص، الخدمات، صوتك، الحساب.
+- تقديم Proposal من Form أو رفع PDF/DOCX.
+- تحميل نموذج Word مباشرة من «صوتك».
+- تنزيل نسخ Proposal بصيغة PDF وWord عندما تكون متاحة.
+- Revision بتعديل البنود أو رفع نسخة جديدة.
+- تغيير البريد وكلمة المرور وتسجيل الخروج.
 
-## إدارة العمل
-- بوابة عضو منفصلة عن مساحة العمل.
-- Projects تبدأ بنتيجة ومسؤول وموعد، ثم قبول التكليف وتصميم Milestones مشترك.
-- Standard + Special project permissions مع موافقات cross-secretariat / Executive Committee.
-- Project reality updates + next check + assistance requests.
-- Evidence نصي/رابط/ملف.
-- Blockers + Secretary early interventions.
-- Verification بواسطة السكرتير.
-- GS/President oversight مع إشارات مسؤولية مبكرة.
-- متابعة دورية مشتقة من البيانات بدل تقرير موازٍ.
-- SLA/early-warning/overdue monitoring.
+## مساحة العمل
+### المشاريع
+- نتيجة واضحة + معيار تحقق + مسؤول + Deadline.
+- GS يعتمد قرار التكليف قبل التفعيل.
+- لا توجد موافقة إلكترونية من المسؤول على التكليف.
+- Milestones قابلة للتعديل مع مواعيد مطلقة أو نسبية.
+- تقرير دوري للمسؤول مستقل عن اقتراب Milestone/Deadline.
+- Evidence، Blockers، طلب دعم، تدخل السكرتير، Verification.
+- GS يرى أين ظهر الخلل وهل استجاب السكرتير.
 
-## المقترحات
-- Structured proposal.
-- Ready-file upload PDF/DOCX.
-- Template download.
-- Full edit/versioning.
-- Secretary review/revision/forward.
-- GS approve/reject/defer/revision.
-- Approved proposal → execution project يحتاج تهيئة النتيجة والمسؤول والموعد قبل بدء التنفيذ.
-- اكتمال التنفيذ مشتق من Milestones المعتمدة بدل زر يدوي مستقل.
+### المهام السريعة
+- Task بسيطة لا تحتاج Project.
+- مسؤول، موعد، أولوية، حالة، ملاحظة، دليل اختياري.
 
-## الحوكمة
-- Meetings.
-- Decision register.
-- تحويل القرار إلى Milestone.
+### العمل الدوري
+- التزام فردي متكرر.
+- صفة عمل خفيفة مثل «أمين أكاديمي» لتطبيق نفس الالتزام على عدة أشخاص مع فصل نتيجة كل شخص.
+- تغيير الدورية مستقبلًا دون حذف التاريخ.
+- اجتماعات دورية مشتركة مع حضور مستقل لكل شخص ومخرجات للاجتماع.
+
+### المقترحات
+- Secretary/GS لا يحتاجان الرجوع لبوابة العضو لتقديم Proposal.
+- Tracking Sheet لدى السكرتير وGS.
+- Versions محفوظة.
+- PDF/Word + Retry وحالة فشل واضحة.
+- توليد المستندات له أولوية، ومنع تكرار، وWatchdog للـJobs العالقة.
+- Google Drive هو الأرشيف الدائم للمستندات.
+
+## المتابعة والرقابة
+- صفحة السكرتير تبدأ بما يحتاج انتباهه الآن.
+- GS Control Tower للمشاريع والمهام والدوري والمقترحات.
+- System health للمستندات Pending/Failed/Stuck.
+- Notifications داخل النظام مرتبطة بأفعال مطلوبة.
 
 ## التقارير
-- Dashboard حسب الدور.
-- Weekly report مشتق من البيانات.
-- Performance dashboard.
-- Secretariat-level comparison للـGS/Admin.
+- PDF/Print رسمي بهوية الرابطة.
+- مشاريع: ملخص أو تفصيلي أو استثناءات فقط.
+- مهام، عمل دوري، ومقترحات.
+- لا يتكرر اسم السكرتارية كعمود عندما يكون التقرير خاصًا بسكرتارية واحدة.
+- CSV موجود كبيانات خام فقط.
 
-## الأرشيف والاتصالات
-- Google Drive archive.
-- Private file downloads.
-- Telegram account linking.
-- Telegram notifications + deep links.
-- Audit log.
+## ما ليس ضمن v4 عن قصد
+- Organogram تفصيلي للمكاتب واللجان.
+- تحويل كل لجنة Project إلى كيان هيكلي منفصل.
+- Hard-coded duties للائحة قد تتغير.
+- Workflow خاص بكل نوع Proposal قبل اعتماد قواعده المؤسسية.
+- الانتخابات والمالية والشكاوى كنظم كاملة؛ هذه Modules مستقلة مستقبلًا.
+
+راجع `KMSA_V4_REFORM_SCOPE_AR.md` لفلسفة النطاق، و`KMSA_ACCEPTANCE_TEST_V4_AR.md` لمعيار الجاهزية.

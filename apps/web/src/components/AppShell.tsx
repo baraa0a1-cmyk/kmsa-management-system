@@ -1,10 +1,12 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, BriefcaseBusiness, ClipboardCheck, FileText, Gauge, Gavel, HandHeart, Home, LogOut, Megaphone, Menu, Network, Radar, RefreshCw, Target, UserRound, Users, X } from 'lucide-react';
+import { Bell, BriefcaseBusiness, ClipboardCheck, ClipboardList, FileText, Gauge, Gavel, HandHeart, Home, LogOut, Megaphone, Menu, Radar, RefreshCw, Target, UserRound, Users, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { signOut } from '../lib/auth';
-import { profileTitle, roleLabel } from '../lib/labels';
+import { profileTitle } from '../lib/labels';
 import { supabase } from '../lib/supabase';
+import { notificationFeed, workflow } from '../lib/api';
+import type { UserNotification } from '../lib/types';
 
 const memberItems=[
  {to:'/',label:'الرئيسية',icon:Home},
@@ -15,8 +17,8 @@ const memberItems=[
 ];
 const workspaceItems=[
  {to:'/workspace',label:'الرئيسية',icon:Gauge,roles:['APPLICANT','MEMBER','SECRETARY','GS','PRESIDENT','ADMIN']},
- {to:'/workspace/structure',label:'الهيكل والفريق',icon:Network,roles:['SECRETARY','GS','PRESIDENT','ADMIN']},
  {to:'/workspace/projects',label:'المشاريع',icon:Target,roles:['APPLICANT','MEMBER','SECRETARY','GS','PRESIDENT','ADMIN']},
+ {to:'/workspace/tasks',label:'المهام',icon:ClipboardList,roles:['APPLICANT','MEMBER','SECRETARY','GS','PRESIDENT','ADMIN']},
  {to:'/workspace/routine',label:'العمل الدوري',icon:RefreshCw,roles:['APPLICANT','MEMBER','SECRETARY','GS','PRESIDENT','ADMIN']},
  {to:'/workspace/proposals',label:'المقترحات',icon:FileText,roles:['SECRETARY','GS','PRESIDENT','ADMIN']},
  {to:'/workspace/reports',label:'التقارير',icon:ClipboardCheck,roles:['SECRETARY','GS','PRESIDENT','ADMIN']},
@@ -25,9 +27,17 @@ const workspaceItems=[
  {to:'/workspace/users',label:'الحسابات',icon:Users,roles:['ADMIN']},
 ];
 
+
+function NotificationBell(){
+ const nav=useNavigate();const [open,setOpen]=useState(false);const [items,setItems]=useState<UserNotification[]>([]);
+ async function load(){try{setItems(await notificationFeed(25) as UserNotification[])}catch{setItems([])}}
+ useEffect(()=>{load()},[]);const unread=items.filter(x=>!x.read_at).length;
+ return <div className="notification-wrap"><button className="member-icon-button notification-button" aria-label="الإشعارات" onClick={()=>{setOpen(!open);if(!open)load()}}><Bell size={19}/>{unread>0&&<b>{unread>9?'9+':unread}</b>}</button>{open&&<div className="notification-popover"><div className="notification-head"><strong>الإشعارات</strong>{unread>0&&<button onClick={async()=>{await workflow('NOTIFICATION_MARK_ALL_READ');await load()}}>تحديد الكل كمقروء</button>}</div><div className="notification-list">{items.length?items.map(n=><button key={n.id} className={n.read_at?'':'unread'} onClick={async()=>{if(!n.read_at)await workflow('NOTIFICATION_MARK_READ',{notificationId:n.id});setOpen(false);if(n.action_path)nav(n.action_path);else await load()}}><span/><div><strong>{n.title}</strong>{n.body&&<p>{n.body}</p>}<small>{new Intl.DateTimeFormat('ar-SD',{dateStyle:'short',timeStyle:'short'}).format(new Date(n.created_at))}</small></div></button>):<div className="notification-empty">لا توجد إشعارات جديدة.</div>}</div></div>}</div>
+}
+
 function MemberShell(){
  const {profile}=useAuth(); const nav=useNavigate(); const {pathname}=useLocation(); const [assigned,setAssigned]=useState(false);
- useEffect(()=>{if(!profile)return;if(['SECRETARY','GS','PRESIDENT','ADMIN'].includes(profile.role)){setAssigned(true);return}(async()=>{const [a,b]=await Promise.all([supabase.from('initiatives').select('id',{count:'exact',head:true}).eq('owner_id',profile.id).eq('approval_status','APPROVED'),supabase.from('routine_obligations').select('id',{count:'exact',head:true}).eq('owner_id',profile.id).eq('active',true)]);setAssigned((a.count||0)>0||(b.count||0)>0)})()},[profile?.id,profile?.role]);
+ useEffect(()=>{if(!profile)return;if(['SECRETARY','GS','PRESIDENT','ADMIN'].includes(profile.role)){setAssigned(true);return}(async()=>{const [a,b,c,d]=await Promise.all([supabase.from('initiatives').select('id',{count:'exact',head:true}).eq('owner_id',profile.id).eq('approval_status','APPROVED'),supabase.from('routine_obligations').select('id',{count:'exact',head:true}).eq('owner_id',profile.id).eq('active',true),supabase.from('quick_tasks').select('id',{count:'exact',head:true}).eq('assignee_id',profile.id).not('status','in','("DONE","CANCELLED")'),supabase.from('position_assignments').select('id',{count:'exact',head:true}).eq('profile_id',profile.id).eq('active',true)]);setAssigned((a.count||0)>0||(b.count||0)>0||(c.count||0)>0||(d.count||0)>0)})()},[profile?.id,profile?.role]);
  if(!profile)return null;
  const active=(to:string)=>to==='/'?pathname==='/':to==='/voice'?(pathname.startsWith('/voice')||pathname.startsWith('/proposals')):pathname.startsWith(to);
  const hasWorkspace=assigned;
@@ -35,7 +45,7 @@ function MemberShell(){
   <header className="member-header"><div className="member-header-inner">
    <NavLink to="/" className="member-brand"><img src={`${import.meta.env.BASE_URL}kmsa-logo.png`} alt="شعار رابطة طلاب كلية الطب"/><div><strong>رابطة طلاب كلية الطب</strong><span>جامعة الخرطوم</span></div></NavLink>
    <nav className="member-desktop-nav">{memberItems.map(({to,label,icon:Icon})=><NavLink key={to} to={to} className={active(to)?'active':''}><Icon size={17}/>{label}</NavLink>)}</nav>
-   <div className="member-header-actions">{hasWorkspace&&<button className="member-workspace-button" onClick={()=>nav('/workspace')}><BriefcaseBusiness size={17}/><span>مساحة العمل</span></button>}<button className="member-icon-button" aria-label="الإشعارات"><Bell size={19}/></button><NavLink to="/account" className="member-account-chip"><span>{profile.full_name.trim().charAt(0)||'ع'}</span><div><strong>{profile.full_name.split(' ')[0]}</strong><small>{profile.university_id||'عضو'}</small></div></NavLink><button className="member-logout-icon" title="تسجيل الخروج" onClick={async()=>{await signOut();nav('/login')}}><LogOut size={18}/></button></div>
+   <div className="member-header-actions">{hasWorkspace&&<button className="member-workspace-button" onClick={()=>nav('/workspace')}><BriefcaseBusiness size={17}/><span>مساحة العمل</span></button>}<NotificationBell/><NavLink to="/account" className="member-account-chip"><span>{profile.full_name.trim().charAt(0)||'ع'}</span><div><strong>{profile.full_name.split(' ')[0]}</strong><small>{profile.university_id||'عضو'}</small></div></NavLink><button className="member-logout-icon" title="تسجيل الخروج" onClick={async()=>{await signOut();nav('/login')}}><LogOut size={18}/></button></div>
   </div></header>
   <main className="member-main"><Outlet/></main>
   <nav className="member-bottom-nav">{memberItems.map(({to,label,icon:Icon})=><NavLink key={to} to={to} className={active(to)?'active':''}><Icon size={21}/><span>{label}</span></NavLink>)}</nav>
@@ -55,7 +65,7 @@ function WorkspaceShell(){
    <div className="workspace-sidebar-bottom"><button className="workspace-nav" onClick={async()=>{await signOut();nav('/login')}}><LogOut size={18}/>تسجيل الخروج</button></div>
   </aside>
   {open&&<div className="mobile-overlay" onClick={()=>setOpen(false)}/>} 
-  <main className="workspace-main"><header className="workspace-topbar"><button className="menu-btn" onClick={()=>setOpen(true)}><Menu/></button><div><strong>{pathname.startsWith('/workspace/structure')?'الهيكل والفريق':pathname.startsWith('/workspace/projects')?'المشاريع':pathname.startsWith('/workspace/routine')?'العمل الدوري':pathname.startsWith('/workspace/proposals')?'المقترحات':pathname.startsWith('/workspace/reports')?'التقارير':'مساحة العمل'}</strong><span>متابعة مبكرة · مسؤولية واضحة · تدخل قبل التأخير</span></div><button className="workspace-home-chip" onClick={()=>nav('/')}><Home size={16}/>بوابة العضو</button></header><div className="workspace-page"><Outlet/></div></main>
+  <main className="workspace-main"><header className="workspace-topbar"><button className="menu-btn" onClick={()=>setOpen(true)}><Menu/></button><div><strong>{pathname.startsWith('/workspace/projects')?'المشاريع':pathname.startsWith('/workspace/tasks')?'المهام':pathname.startsWith('/workspace/routine')?'العمل الدوري':pathname.startsWith('/workspace/proposals')?'المقترحات':pathname.startsWith('/workspace/reports')?'التقارير':'مساحة العمل'}</strong><span>متابعة مبكرة · مسؤولية واضحة · تدخل قبل التأخير</span></div><div className="workspace-topbar-actions"><NotificationBell/><button className="workspace-home-chip" onClick={()=>nav('/')}><Home size={16}/>بوابة العضو</button></div></header><div className="workspace-page"><Outlet/></div></main>
  </div>
 }
 

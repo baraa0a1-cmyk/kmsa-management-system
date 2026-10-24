@@ -23,8 +23,11 @@ function sanitize_(s){return String(s||'').replace(/[\\/:*?"<>|]/g,'-').replace(
 function proposalFolder_(p){
   const root=DriveApp.getFolderById(props_().getProperty('ARCHIVE_ROOT_FOLDER_ID'));
   if (p.driveFolderId) { try { return DriveApp.getFolderById(p.driveFolderId); } catch(e) {} }
+  const proposals=getOrCreateFolder_(root,'Proposals');
+  const secName=sanitize_((p.secretariatCode||'GENERAL')+(p.secretariatName?' - '+p.secretariatName:''));
+  const secFolder=getOrCreateFolder_(proposals,secName||'GENERAL');
   const folderName=sanitize_(p.internalId + ' - ' + p.title);
-  const found=root.getFoldersByName(folderName); return found.hasNext()?found.next():root.createFolder(folderName);
+  const found=secFolder.getFoldersByName(folderName); return found.hasNext()?found.next():secFolder.createFolder(folderName);
 }
 function importDocxAsGoogleDoc_(templateId, parentId, name) {
   const blob=DriveApp.getFileById(templateId).getBlob();

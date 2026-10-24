@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import type { Blocker, Evidence, Initiative, Intervention, MemberDirectoryItem, Milestone, Plan, Profile, ProjectBundle, ProjectIntervention, ProjectPermission, ProjectPermissionApproval, ProjectSheetRow, ProjectUpdate, Proposal, ProposalDocumentStatus, ProposalSheetRow, ResultItem, RoutineObligationRow, Secretariat, WeeklyCommitment, OrgStructureSnapshot } from './types';
+import type { Blocker, Evidence, Initiative, Intervention, MemberDirectoryItem, Milestone, Plan, Profile, ProjectBundle, ProjectIntervention, ProjectPermission, ProjectPermissionApproval, ProjectSheetRow, ProjectUpdate, Proposal, ProposalDocumentStatus, ProposalSheetRow, ResultItem, RoutineObligationRow, Secretariat, WeeklyCommitment } from './types';
 
 export async function currentProfile(): Promise<Profile> {
   const { data: auth } = await supabase.auth.getUser();
@@ -99,12 +99,6 @@ export async function proposalTrackingSheet(): Promise<ProposalSheetRow[]> {
 export async function routineObligationSheet(): Promise<RoutineObligationRow[]> {
   const {data,error}=await supabase.rpc('routine_obligation_sheet'); if(error)throw error; return (data||[]) as RoutineObligationRow[];
 }
-
-export async function organizationStructure(secretariatId?:string): Promise<OrgStructureSnapshot> {
-  const {data,error}=await supabase.rpc('org_structure_snapshot',{p_secretariat_id:secretariatId||null});
-  if(error)throw error; return data as OrgStructureSnapshot;
-}
-
 export async function proposalDocumentStatus(proposalId:string): Promise<ProposalDocumentStatus> {
   const {data,error}=await supabase.rpc('proposal_document_status',{p_proposal_id:proposalId}); if(error)throw error; return (data||{}) as ProposalDocumentStatus;
 }
@@ -133,3 +127,13 @@ function saveBase64File(fileName:string,mimeType:string,base64:string){
 export async function downloadDriveFile(driveFileId:string){const d=await workflow('FILE_DOWNLOAD',{driveFileId});saveBase64File(d.fileName,d.mimeType,d.base64)}
 export async function downloadTemplate(){const d=await workflow('TEMPLATE_DOWNLOAD',{});saveBase64File(d.fileName,d.mimeType,d.base64)}
 export async function uploadToStaging(file:File){const {data:{user}}=await supabase.auth.getUser();if(!user)throw new Error('UNAUTHORIZED');const safe=file.name.replace(/[^\w.\-\u0600-\u06FF]+/g,'_');const path=`${user.id}/${crypto.randomUUID()}-${safe}`;const ext=file.name.split('.').pop()?.toLowerCase();const inferred=ext==='pdf'?'application/pdf':ext==='docx'?'application/vnd.openxmlformats-officedocument.wordprocessingml.document':file.type||'application/octet-stream';const {error}=await supabase.storage.from('staging').upload(path,file,{upsert:false,contentType:inferred});if(error)throw new Error(error.message||'تعذر رفع الملف مؤقتًا.');return path}
+
+export async function operationalPositions(){const {data,error}=await supabase.rpc('operational_position_sheet');if(error)throw error;return data||[];}
+export async function positionAssignments(positionId:string){const {data,error}=await supabase.from('position_assignments').select('*,profile:profiles(id,full_name,university_id)').eq('position_id',positionId).order('active',{ascending:false}).order('starts_at',{ascending:false});if(error)throw error;return data||[];}
+export async function positionDutyTemplates(positionId:string){const {data,error}=await supabase.from('position_duty_templates').select('*').eq('position_id',positionId).order('active',{ascending:false}).order('created_at');if(error)throw error;return data||[];}
+export async function positionEventTemplates(positionId:string){const {data,error}=await supabase.from('position_event_templates').select('*').eq('position_id',positionId).order('active',{ascending:false}).order('next_event_at');if(error)throw error;return data||[];}
+export async function quickTaskSheet(){const {data,error}=await supabase.rpc('quick_task_sheet');if(error)throw error;return data||[];}
+export async function workEventSheet(){const {data,error}=await supabase.rpc('work_event_sheet');if(error)throw error;return data||[];}
+export async function eventAttendance(eventId:string){const {data,error}=await supabase.from('event_attendance').select('*,profile:profiles(id,full_name,university_id)').eq('event_id',eventId).order('status').order('created_at');if(error)throw error;return data||[];}
+export async function notificationFeed(limit=30){const {data,error}=await supabase.rpc('user_notification_feed',{p_limit:limit});if(error)throw error;return data||[];}
+export async function readinessSnapshot(){const {data,error}=await supabase.rpc('system_readiness_snapshot');if(error)throw error;return data||{};}

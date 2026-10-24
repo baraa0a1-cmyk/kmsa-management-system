@@ -1,27 +1,33 @@
-# KMSA Management System
+# KMSA Management System — Operating System v4
 
-نظام مؤسسي لإدارة عمل رابطة طلاب كلية الطب — جامعة الخرطوم.
+نظام متابعة وتنفيذ ومساءلة لرابطة طلاب كلية الطب — جامعة الخرطوم.
 
-هذه النسخة ليست Proposal System. المقترحات Module ضمن نظام أوسع يدير:
+## ما هو النظام؟
 
-- المستخدمين والأدوار والسكرتاريات والدورات.
-- الخطط ومسارات التنفيذ والنتائج.
-- Milestones القابلة للتحقق.
-- الالتزامات الأسبوعية من نفس سجل العمل، دون تقارير موازية.
-- الأدلة، العوائق، تدخلات السكرتير، والتحقق.
-- رقابة السكرتارية العامة على أداء السكرتير دون التدخل المباشر في عمل المالك.
-- المقترحات من التقديم إلى القرار ثم التنفيذ.
-- Versions وAudit Trail.
-- الاجتماعات وسجل القرارات وتحويل القرار إلى Milestone.
-- لوحة الأداء والتقرير الأسبوعي.
-- Google Drive للأرشيف وWord/PDF.
-- Telegram للإشعارات والمتابعة فقط.
+ليس نظامًا للهيكلة، وليس مجرد Proposal System. مركزه هو العمل الحقيقي:
 
-## المبدأ التشغيلي
+`Result → Responsible person → Continuous update → Early warning → Secretary intervention → Evidence → Institutional learning`
 
-`Result → Milestone → Weekly Commitment → Evidence → Exception/Blocker → Secretary Intervention → Verification`
+## مسارات العمل الأساسية
 
-كل خطوة في هذه الحلقة محفوظة في قاعدة واحدة. التقرير الأسبوعي والـDashboard يقرآن منها مباشرة.
+- **المشاريع:** نتيجة، مسؤول، Deadline، محطات إنجاز، تحديث دوري، دليل، عائق، تدخل وتحقق.
+- **المهام السريعة:** تكليف صغير مباشر لا يحتاج Project/Milestones.
+- **العمل الدوري:** استحقاقات متكررة ومخرجات مستقلة لكل شخص.
+- **المقترحات:** Form أو Upload، Versions، PDF/Word، مراجعة وإجازة ومتابعة زمنية.
+
+توجد «مناصب/صفات عمل» خفيفة فقط عندما نحتاج تطبيق نفس التزام أو اجتماع على عدة أشخاص. لا توجد محاولة لبناء Organogram تفصيلي داخل النظام.
+
+## الرقابة الإصلاحية
+
+- المسؤول لا ينتظر اقتراب Deadline؛ للمشروع Update cadence مستقل.
+- التعثر وغياب التحديث يظهران قبل الفشل النهائي.
+- تدخل السكرتير نفسه قابل للرؤية، وليس تقصير المنفذ فقط.
+- GS يرى المشاريع والمهام والدوري والمقترحات والاستثناءات عبر السكرتاريات.
+- لا تُكتب تقارير موازية لإعادة إدخال نفس العمل؛ التقارير تُستخرج من سجل التنفيذ.
+
+## المستندات والأرشيف
+
+Google Drive هو الأرشيف الدائم للمستندات. Supabase يحفظ قاعدة العمل وMetadata وFile IDs وسجل النسخ. توليد المقترحات يدعم Google Docs Master Template ثم PDF/DOCX، مع Queue مقاومة للتكرار وWatchdog للـJobs العالقة.
 
 ## المعمارية
 
@@ -35,21 +41,25 @@ GitHub Repository
                  │         │          │
              PostgreSQL   Auth   Edge Functions
                  │                    │
-                 │                    ├─ Telegram Bot
+                 │                    ├─ Notifications
                  │                    └─ Apps Script Drive Bridge
                  │                               │
-                 └────────────────────────── Google Drive
+                 └────────────────────────── Google Drive Archive
 ```
 
-لا توجد أسرار داخل GitHub Pages. المفتاح الموجود في الواجهة هو مفتاح Supabase publishable/anon المصمم للاستخدام في العميل، والحماية الفعلية بواسطة RLS والـEdge Functions.
+## أين أبدأ؟
 
-## هيكل المشروع
+- التثبيت: `INSTALL_WORKSPACE_V4_AR.md`
+- فلسفة النطاق: `docs/KMSA_V4_REFORM_SCOPE_AR.md`
+- اختبار الجاهزية: `docs/KMSA_ACCEPTANCE_TEST_V4_AR.md`
+- تثبيت قالب المقترح: `PROPOSAL_PDF_MASTER_TEMPLATE_AR.md`
 
-- `apps/web/` الواجهة.
-- `supabase/migrations/` Schema + RLS + reporting.
-- `supabase/functions/` الـWorkflow والخدمات الخلفية.
-- `google-apps-script/` جسر Google Drive وWord/PDF.
-- `.github/workflows/` نشر GitHub Pages تلقائيًا.
-- `docs/` دليل التشغيل والأدوار والاختبارات والاستيراد.
+## فحص ثابت قبل النشر
 
-ابدأ من: `docs/START_HERE_AR.md`.
+يمكن تشغيل:
+
+```bash
+node scripts/v4-static-readiness.mjs
+```
+
+هذا يفحص اكتمال مكونات v4 الأساسية وتطابق SQL وعدم وجود Secret واضح في المصدر. لا يغني عن اختبار البيئة الحية.
