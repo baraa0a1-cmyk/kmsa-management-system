@@ -18,7 +18,15 @@ Deno.serve(async(req)=>{if(req.method==='OPTIONS')return new Response('ok',{head
   ]);
   const resultIds=(projectResults||[]).map((x:any)=>x.id);let openBlockers=0;
   if(resultIds.length){const {data:projectMilestones}=await db.from('milestones').select('id').in('result_id',resultIds);const milestoneIds=(projectMilestones||[]).map((x:any)=>x.id);if(milestoneIds.length){const {count}=await db.from('blockers').select('*',{count:'exact',head:true}).in('milestone_id',milestoneIds).eq('status','OPEN');openBlockers=count||0}}
-  const stale=!p.last_update_at||now-new Date(p.last_update_at).getTime()>5*86400000;
+  const updateDue=p.next_update_due_at?new Date(p.next_update_due_at).getTime():null;
+  const stale=!!(updateDue&&updateDue<now);
+  if(updateDue){
+   const updateEvent=stale?'PROJECT_UPDATE_OVERDUE':(updateDue-now<=12*3600000?'PROJECT_UPDATE_DUE_SOON':'');
+   if(updateEvent&&!await recently(db,updateEvent,'INITIATIVE',p.id,12)){
+    await db.from('background_jobs').insert({job_type:'TELEGRAM_NOTIFY',entity_type:'INITIATIVE',entity_id:p.id,payload:{event:updateEvent}});
+    await db.from('notification_log').insert({channel:'SYSTEM',recipient:'RESPONSIBLE',event_type:updateEvent,entity_type:'INITIATIVE',entity_id:p.id,status:'QUEUED'});
+   }
+  }
   const due=p.target_due_at?new Date(p.target_due_at).getTime():null;
   const approaching=!!(due&&due>now&&due-now<=5*86400000);
   const nextCheckMissed=!!(latestUpdate?.next_check_at&&new Date(latestUpdate.next_check_at).getTime()<now);
@@ -29,7 +37,7 @@ Deno.serve(async(req)=>{if(req.method==='OPTIONS')return new Response('ok',{head
   if(risky&&!await recently(db,'PROJECT_EARLY_WARNING','INITIATIVE',p.id,24)){
    const reasons:string[]=[];
    if(['WATCH','AT_RISK','BLOCKED'].includes(p.health))reasons.push(`health:${p.health}`);
-   if(stale)reasons.push('stale_update');
+   if(stale)reasons.push('periodic_update_overdue');
    if(approaching)reasons.push('result_due_soon');
    if(nextCheckMissed)reasons.push('next_check_missed');
    if(assistanceNeeded)reasons.push('assistance_requested');
@@ -39,5 +47,7 @@ Deno.serve(async(req)=>{if(req.method==='OPTIONS')return new Response('ok',{head
    await db.from('notification_log').insert({channel:'SYSTEM',recipient:'SECRETARY',event_type:'PROJECT_EARLY_WARNING',entity_type:'INITIATIVE',entity_id:p.id,status:'QUEUED'});
   }
  }
+ const {data:routines}=await db.from('routine_obligations').select('*').eq('active',true);
+ for(const r of routines||[]){const due=new Date(r.next_due_at).getTime();if(due<now&&!await recently(db,'ROUTINE_OVERDUE','ROUTINE',r.id,24)){await db.from('background_jobs').insert({job_type:'TELEGRAM_NOTIFY',entity_type:'ROUTINE',entity_id:r.id,payload:{event:'ROUTINE_OVERDUE'}});await db.from('notification_log').insert({channel:'SYSTEM',recipient:'RESPONSIBLE',event_type:'ROUTINE_OVERDUE',entity_type:'ROUTINE',entity_id:r.id,status:'QUEUED'})}else if(due>=now&&due-now<=dueSoon&&!await recently(db,'ROUTINE_DUE_SOON','ROUTINE',r.id,24)){await db.from('background_jobs').insert({job_type:'TELEGRAM_NOTIFY',entity_type:'ROUTINE',entity_id:r.id,payload:{event:'ROUTINE_DUE_SOON'}});await db.from('notification_log').insert({channel:'SYSTEM',recipient:'RESPONSIBLE',event_type:'ROUTINE_DUE_SOON',entity_type:'ROUTINE',entity_id:r.id,status:'QUEUED'})}}
  const {data:ps}=await db.from('proposals').select('*').in('status',['WITH_SECRETARY','WITH_GS']);for(const p of ps||[]){const due=p.status==='WITH_GS'?p.gs_due_at:p.secretary_due_at;if(!due)continue;const t=new Date(due).getTime();const event=t<now?'PROPOSAL_OVERDUE':'PROPOSAL_DUE_SOON';if((t<now||t-now<=dueSoon)&&!await recently(db,event,'PROPOSAL',p.id,12)){await db.from('background_jobs').insert({job_type:'TELEGRAM_NOTIFY',entity_type:'PROPOSAL',entity_id:p.id,payload:{event}});await db.from('notification_log').insert({channel:'SYSTEM',recipient:'RESPONSIBLE',event_type:event,entity_type:'PROPOSAL',entity_id:p.id,status:'QUEUED'})}}
  return json({ok:true,processedJobs:(jobs||[]).length});}catch(e:any){console.error(e);return json({error:e?.message||String(e)},500)}});

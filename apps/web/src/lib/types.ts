@@ -37,7 +37,7 @@ export interface Initiative {
   id: string; plan_id: string | null; proposal_id: string | null; title: string; objective: string | null;
   owner_id: string; secretary_id: string | null; secretariat_id: string; status: string; source_type: string;
   setup_status: ProjectSetupStatus | string; approval_status?: 'DRAFT'|'PENDING_GS'|'APPROVED'|'RETURNED'|string; gs_review_note?: string|null; gs_approved_at?: string|null; assignment_start_at?: string|null; health: ProjectHealth; target_due_at: string | null; activated_at: string | null;
-  last_update_at: string | null; completed_at: string | null; created_at?: string; updated_at?: string;
+  last_update_at: string | null; update_interval_days?: number; next_update_due_at?: string | null; completed_at: string | null; created_at?: string; updated_at?: string;
   owner?: Pick<Profile,'id'|'full_name'>; secretary?: Pick<Profile,'id'|'full_name'>; secretariat?: Secretariat;
 }
 export interface ResultItem { id: string; initiative_id: string; statement: string; success_measure: string | null; owner_id: string | null; due_at: string | null; assignment_status?: string; assignment_feedback?: string | null; accepted_at?: string | null; completed_at?: string | null; owner?: Pick<Profile,'id'|'full_name'>; }
@@ -63,13 +63,24 @@ export interface ProjectSheetRow {
   project_id:string; secretariat_id:string; secretariat_name:string; project_title:string; approval_status:string; setup_status:string;
   project_status:string; health:string; lead_id:string; lead_name:string; secretary_id:string|null; secretary_name:string|null;
   result_statement:string|null; success_measure:string|null; assignment_start_at:string|null; target_due_at:string|null;
-  total_milestones:number; verified_milestones:number; current_milestone:string|null; current_milestone_due_at:string|null;
-  current_milestone_status:string|null; current_milestone_overdue:boolean; days_to_current_milestone:number|null; last_lead_note:string|null; last_lead_update_at:string|null; last_intervention:string|null;
-  last_intervention_at:string|null; open_blockers:number; pending_special_permissions:number; needs_attention:boolean;
+  update_interval_days:number; next_update_due_at:string|null; update_overdue:boolean; total_milestones:number; verified_milestones:number; current_milestone:string|null; current_milestone_due_at:string|null;
+  current_milestone_status:string|null; current_milestone_overdue:boolean; days_to_current_milestone:number|null; latest_update_note:string|null; latest_update_health:string|null; last_lead_note:string|null; last_lead_update_at:string|null; last_intervention:string|null;
+  last_intervention_at:string|null; open_blockers:number; latest_blocker_at:string|null; pending_special_permissions:number; needs_attention:boolean; secretary_response_needed:boolean;
 }
 export interface ProposalSheetRow {
   proposal_id:string; internal_id:string; title:string; applicant_name:string; secretariat_id:string; secretariat_name:string;
   status:string; execution_status:string; submitted_at:string|null; updated_at:string; stage_due_at:string|null; overdue:boolean;
-  days_in_current_stage:number; current_version:number; current_pdf_drive_file_id:string|null;
+  days_in_current_stage:number; current_version:number; current_pdf_drive_file_id:string|null; document_status:string; document_error:string|null;
 }
 export interface MemberDirectoryItem { id:string; full_name:string; university_id:string|null; email:string; }
+
+
+export interface RoutineObligationRow {
+  obligation_id:string; secretariat_id:string; secretariat_name:string; title:string; description:string|null; expected_output:string|null;
+  owner_id:string; owner_name:string; secretary_id:string|null; secretary_name:string|null; cadence:'WEEKLY'|'MONTHLY'|'QUARTERLY'|'CUSTOM'|string;
+  next_due_at:string; overdue:boolean; days_to_due:number; last_status:string|null; last_report:string|null; last_output:string|null;
+  last_secretary_note:string|null; last_submitted_at:string|null;
+}
+export interface ProposalDocumentStatus {
+  pdfReady:boolean; pdfDriveFileId:string|null; docxDriveFileId:string|null; jobStatus:string; lastError:string|null; attempts:number; updatedAt:string|null;
+}

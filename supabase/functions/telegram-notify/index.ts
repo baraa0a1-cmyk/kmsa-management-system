@@ -16,6 +16,12 @@ Deno.serve(async(req)=>{if(req.method==='OPTIONS')return new Response('ok',{head
   else recipients=[applicant,secretary];
   title=`<b>${p.title}</b>\n${p.secretariat?.name_ar||''}\n${payload.note||''}`;
  }
+ if(entity_type==='ROUTINE'){
+  const r=(await db.from('routine_obligations').select('*,owner:profiles!routine_obligations_owner_id_fkey(*),secretary:profiles!routine_obligations_secretary_id_fkey(*),secretariat:secretariats(name_ar)').eq('id',entity_id).single()).data;if(!r)throw new Error('Routine obligation not found');
+  const oversight=(await db.from('profiles').select('*').in('role',['GS','PRESIDENT','ADMIN']).eq('active',true)).data||[];staffUrl=memberUrl=`${base}/#/workspace/routine`;
+  recipients=event==='ROUTINE_NEEDS_ATTENTION'?[r.owner,r.secretary,...oversight]:[r.owner,r.secretary];title=`<b>${r.title}</b>
+${r.secretariat?.name_ar||''}`;
+ }
  if(entity_type==='MILESTONE'){
   const m=(await db.from('milestones').select('*,owner:profiles!milestones_owner_id_fkey(*),secretariat:secretariats(name_ar)').eq('id',entity_id).single()).data;if(!m)throw new Error('Milestone not found');
   const secretary=(await db.from('profiles').select('*').eq('secretariat_id',m.secretariat_id).eq('role','SECRETARY').eq('active',true).maybeSingle()).data;
@@ -42,9 +48,10 @@ Deno.serve(async(req)=>{if(req.method==='OPTIONS')return new Response('ok',{head
   title=`<b>${p.title}</b>\n${p.secretariat?.name_ar||''}`;
  }
  const unique=new Map(recipients.filter(Boolean).map(r=>[r.id,r]));
+ const eventLabel:Record<string,string>={PROJECT_UPDATE_DUE_SOON:'موعد التحديث الدوري للمشروع اقترب',PROJECT_UPDATE_OVERDUE:'التحديث الدوري للمشروع متأخر',PROJECT_EARLY_WARNING:'المشروع يحتاج متابعة',ROUTINE_DUE_SOON:'موعد العمل الدوري اقترب',ROUTINE_OVERDUE:'العمل الدوري متأخر',PROPOSAL_OVERDUE:'المقترح تجاوز مدة المتابعة',PROPOSAL_DUE_SOON:'موعد متابعة المقترح اقترب'};
  for(const r of unique.values()){
   if(!r.telegram_chat_id)continue;const url=entity_type==='PROPOSAL'&&r.id===proposalApplicantId?memberUrl:staffUrl;
-  try{const mid=await send(r.telegram_chat_id,`🔔 ${event}\n\n${title}`,url);await db.from('notification_log').insert({channel:'TELEGRAM',recipient:r.telegram_chat_id,event_type:event,entity_type,entity_id,status:'SENT',provider_message_id:String(mid||'')})}catch(e:any){await db.from('notification_log').insert({channel:'TELEGRAM',recipient:r.telegram_chat_id,event_type:event,entity_type,entity_id,status:'FAILED',error:e?.message||String(e)})}
+  try{const mid=await send(r.telegram_chat_id,`🔔 ${eventLabel[event]||event}\n\n${title}`,url);await db.from('notification_log').insert({channel:'TELEGRAM',recipient:r.telegram_chat_id,event_type:event,entity_type,entity_id,status:'SENT',provider_message_id:String(mid||'')})}catch(e:any){await db.from('notification_log').insert({channel:'TELEGRAM',recipient:r.telegram_chat_id,event_type:event,entity_type,entity_id,status:'FAILED',error:e?.message||String(e)})}
  }
  return json({ok:true,count:unique.size});
 }catch(e:any){console.error(e);return json({error:e?.message||String(e)},500)}});

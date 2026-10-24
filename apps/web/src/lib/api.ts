@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import type { Blocker, Evidence, Initiative, Intervention, MemberDirectoryItem, Milestone, Plan, Profile, ProjectBundle, ProjectIntervention, ProjectPermission, ProjectPermissionApproval, ProjectSheetRow, ProjectUpdate, Proposal, ProposalSheetRow, ResultItem, Secretariat, WeeklyCommitment } from './types';
+import type { Blocker, Evidence, Initiative, Intervention, MemberDirectoryItem, Milestone, Plan, Profile, ProjectBundle, ProjectIntervention, ProjectPermission, ProjectPermissionApproval, ProjectSheetRow, ProjectUpdate, Proposal, ProposalDocumentStatus, ProposalSheetRow, ResultItem, RoutineObligationRow, Secretariat, WeeklyCommitment } from './types';
 
 export async function currentProfile(): Promise<Profile> {
   const { data: auth } = await supabase.auth.getUser();
@@ -95,6 +95,14 @@ export async function workspaceProjectSheet(): Promise<ProjectSheetRow[]> {
 export async function proposalTrackingSheet(): Promise<ProposalSheetRow[]> {
   const {data,error}=await supabase.rpc('proposal_tracking_sheet'); if(error)throw error; return (data||[]) as ProposalSheetRow[];
 }
+
+export async function routineObligationSheet(): Promise<RoutineObligationRow[]> {
+  const {data,error}=await supabase.rpc('routine_obligation_sheet'); if(error)throw error; return (data||[]) as RoutineObligationRow[];
+}
+export async function proposalDocumentStatus(proposalId:string): Promise<ProposalDocumentStatus> {
+  const {data,error}=await supabase.rpc('proposal_document_status',{p_proposal_id:proposalId}); if(error)throw error; return (data||{}) as ProposalDocumentStatus;
+}
+
 export function exportCsv(fileName:string, rows:Record<string,any>[], columns:{key:string;label:string}[]){
   const esc=(v:any)=>`"${String(v??'').replace(/"/g,'""')}"`;
   const lines=[columns.map(c=>esc(c.label)).join(','),...rows.map(r=>columns.map(c=>esc(r[c.key])).join(','))];

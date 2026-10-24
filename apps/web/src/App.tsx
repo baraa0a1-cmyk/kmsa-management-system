@@ -23,13 +23,15 @@ import WorkspaceProjectCreatePage from './pages/WorkspaceProjectCreatePage';
 import WorkspaceProjectPage from './pages/WorkspaceProjectPage';
 import WorkspaceApprovalsPage from './pages/WorkspaceApprovalsPage';
 import WorkspaceOversightPage from './pages/WorkspaceOversightPage';
-import WorkspaceWeeklyPage from './pages/WorkspaceWeeklyPage';
+import WorkspaceReportsPage from './pages/WorkspaceReportsPage';
+import WorkspaceRoutinePage from './pages/WorkspaceRoutinePage';
 import MilestonePage from './pages/MilestonePage';
 
 function Guard({children}:{children:React.ReactNode}){const {session,profile,loading}=useAuth(); if(loading)return <div className="splash"><div className="loader"/><div>جارٍ تجهيز حسابك…</div></div>; if(!session)return <Navigate to="/login" replace/>; if(profile?.must_change_password)return <Navigate to="/change-password" replace/>; return <>{children}</>}
 function LoginGuard(){const {session,loading}=useAuth();if(loading)return <div className="splash"><div className="loader"/></div>;return session?<Navigate to="/" replace/>:<LoginPage/>}
 function WorkspaceOnly({children}:{children:React.ReactNode}){const {profile}=useAuth();return profile?<>{children}</>:<Navigate to="/" replace/>}
 function SecretaryOrAbove({children}:{children:React.ReactNode}){const {profile}=useAuth();return profile&&['SECRETARY','GS','PRESIDENT','ADMIN'].includes(profile.role)?<>{children}</>:<Navigate to="/workspace" replace/>}
+function SecretaryOrAdmin({children}:{children:React.ReactNode}){const {profile}=useAuth();return profile&&['SECRETARY','ADMIN'].includes(profile.role)?<>{children}</>:<Navigate to="/workspace" replace/>}
 function OversightOnly({children}:{children:React.ReactNode}){const {profile}=useAuth();return profile&&['GS','PRESIDENT','ADMIN'].includes(profile.role)?<>{children}</>:<Navigate to="/workspace" replace/>}
 function AdminOnly({children}:{children:React.ReactNode}){const {profile}=useAuth();return profile?.role==='ADMIN'?<>{children}</>:<Navigate to="/workspace" replace/>}
 
@@ -48,15 +50,17 @@ export default function App(){return <AuthProvider><Routes>
 
   <Route path="/workspace" element={<WorkspaceOnly><WorkspaceHomePage/></WorkspaceOnly>}/>
   <Route path="/workspace/projects" element={<WorkspaceOnly><WorkspaceProjectsPage/></WorkspaceOnly>}/>
-  <Route path="/workspace/projects/new" element={<SecretaryOrAbove><WorkspaceProjectCreatePage/></SecretaryOrAbove>}/><Route path="/workspace/projects/:id/edit" element={<SecretaryOrAbove><WorkspaceProjectCreatePage/></SecretaryOrAbove>}/>
+  <Route path="/workspace/projects/new" element={<SecretaryOrAdmin><WorkspaceProjectCreatePage/></SecretaryOrAdmin>}/><Route path="/workspace/projects/:id/edit" element={<SecretaryOrAdmin><WorkspaceProjectCreatePage/></SecretaryOrAdmin>}/>
   <Route path="/workspace/projects/:id" element={<WorkspaceOnly><WorkspaceProjectPage/></WorkspaceOnly>}/>
   <Route path="/workspace/milestones/:id" element={<WorkspaceOnly><MilestonePage/></WorkspaceOnly>}/>
   <Route path="/workspace/approvals" element={<SecretaryOrAbove><WorkspaceApprovalsPage/></SecretaryOrAbove>}/>
-  <Route path="/workspace/weekly" element={<SecretaryOrAbove><WorkspaceWeeklyPage/></SecretaryOrAbove>}/>
+  <Route path="/workspace/routine" element={<WorkspaceOnly><WorkspaceRoutinePage/></WorkspaceOnly>}/>
+  <Route path="/workspace/reports" element={<SecretaryOrAbove><WorkspaceReportsPage/></SecretaryOrAbove>}/>
+  <Route path="/workspace/weekly" element={<Navigate to="/workspace/reports" replace/>}/>
   <Route path="/workspace/oversight" element={<OversightOnly><WorkspaceOversightPage/></OversightOnly>}/>
   <Route path="/workspace/proposals" element={<SecretaryOrAbove><WorkspaceProposalsPage/></SecretaryOrAbove>}/>
   <Route path="/workspace/proposals/:id" element={<SecretaryOrAbove><ProposalPage/></SecretaryOrAbove>}/>
-  <Route path="/workspace/governance" element={<SecretaryOrAbove><GovernancePage/></SecretaryOrAbove>}/>
+  <Route path="/workspace/governance" element={<OversightOnly><GovernancePage/></OversightOnly>}/>
   <Route path="/workspace/performance" element={<OversightOnly><PerformancePage/></OversightOnly>}/>
   <Route path="/workspace/admin" element={<AdminOnly><AdminPage/></AdminOnly>}/>
   <Route path="/workspace/users" element={<AdminOnly><UsersPage/></AdminOnly>}/>

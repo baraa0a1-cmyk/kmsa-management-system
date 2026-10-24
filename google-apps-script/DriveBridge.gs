@@ -1,6 +1,8 @@
 /** KMSA Drive Archive Bridge
  * Script Properties required:
- * BRIDGE_SECRET, ARCHIVE_ROOT_FOLDER_ID, PROPOSAL_TEMPLATE_DOCX_ID
+ * BRIDGE_SECRET, ARCHIVE_ROOT_FOLDER_ID
+ * Proposal template: prefer PROPOSAL_TEMPLATE_GOOGLE_DOC_ID for stable PDF layout.
+ * Keep PROPOSAL_TEMPLATE_DOCX_ID as the downloadable Word template and fallback generator.
  */
 function doPost(e) {
   try {
@@ -35,6 +37,17 @@ function importDocxAsGoogleDoc_(templateId, parentId, name) {
   if(r.getResponseCode()>=300)throw new Error('Template import failed: '+r.getContentText());
   return JSON.parse(r.getContentText()).id;
 }
+function createWorkingProposalDoc_(parentId, name) {
+  const masterDocId=String(props_().getProperty('PROPOSAL_TEMPLATE_GOOGLE_DOC_ID')||'').trim();
+  if(masterDocId){
+    const source=DriveApp.getFileById(masterDocId);
+    return source.makeCopy(name,DriveApp.getFolderById(parentId)).getId();
+  }
+  const docxId=String(props_().getProperty('PROPOSAL_TEMPLATE_DOCX_ID')||'').trim();
+  if(!docxId) throw new Error('Proposal template missing: set PROPOSAL_TEMPLATE_GOOGLE_DOC_ID or PROPOSAL_TEMPLATE_DOCX_ID');
+  return importDocxAsGoogleDoc_(docxId,parentId,name);
+}
+
 function replacePlaceholders_(docId, values) {
   const requests=Object.keys(values).map(k=>({replaceAllText:{containsText:{text:'{{'+k+'}}',matchCase:true},replaceText:String(values[k]==null?'':values[k])}}));
   const r=UrlFetchApp.fetch('https://docs.googleapis.com/v1/documents/'+encodeURIComponent(docId)+':batchUpdate',{method:'post',contentType:'application/json',payload:JSON.stringify({requests:requests}),headers:{Authorization:'Bearer '+ScriptApp.getOAuthToken()},muteHttpExceptions:true});
@@ -47,9 +60,8 @@ function exportDoc_(docId, mime, name){
 }
 function generateProposal_(p,v){
   if(!p||!v||!v.snapshot)throw new Error('Missing proposal/version snapshot');
-  const templateId=props_().getProperty('PROPOSAL_TEMPLATE_DOCX_ID'); if(!templateId)throw new Error('PROPOSAL_TEMPLATE_DOCX_ID missing');
   const folder=proposalFolder_(p); const versions=getOrCreateFolder_(folder,'Versions'); const n=Number(v.versionNo||1); const base=sanitize_(p.internalId+'_V'+('00'+n).slice(-2));
-  const docId=importDocxAsGoogleDoc_(templateId,versions.getId(),base+' - Working');
+  const docId=createWorkingProposalDoc_(versions.getId(),base+' - Working');
   const s=v.snapshot;
   replacePlaceholders_(docId,{
     INTERNAL_ID:p.internalId,TITLE:s.title||p.title,APPLICANT_NAME:s.applicant_name||'',APPLICANT_EMAIL:s.applicant_email||'',

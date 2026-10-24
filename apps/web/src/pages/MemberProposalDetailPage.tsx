@@ -1,14 +1,14 @@
-import { ArrowRight, Download, Edit3, FileText, RotateCcw, Trash2 } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Download, Edit3, FileText, RefreshCw, RotateCcw, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { downloadDriveFile, proposalById, proposalHistory, workflow } from '../lib/api';
+import { downloadDriveFile, proposalById, proposalDocumentStatus, proposalHistory, workflow } from '../lib/api';
 import { formatDateTime, proposalStatusLabel } from '../lib/labels';
-import type { Proposal } from '../lib/types';
+import type { Proposal, ProposalDocumentStatus } from '../lib/types';
 
 const actionLabels:Record<string,string>={CREATED:'تم إنشاء المقترح',SECRETARY_REVISION_REQUESTED:'طلبت السكرتارية تعديلًا',GS_REVISION_REQUESTED:'طُلب تعديل من السكرتارية العامة',REVISION_UPLOADED:'تم رفع نسخة معدلة',SECRETARY_FORWARDED:'رُفع للسكرتارية العامة',GS_APPROVED:'تمت إجازة المقترح',GS_REJECTED:'لم تتم إجازة المقترح',GS_DEFERRED:'تم تأجيل النظر',WITHDRAWN:'تم سحب المقترح'};
 export default function MemberProposalDetailPage(){
- const {id}=useParams(); const [p,setP]=useState<Proposal|null>(null); const [hist,setHist]=useState<any>({actions:[],versions:[]}); const [busy,setBusy]=useState(false); const [err,setErr]=useState('');
- async function load(){if(!id)return;const [a,b]=await Promise.all([proposalById(id),proposalHistory(id)]);setP(a);setHist(b)}
+ const {id}=useParams(); const [p,setP]=useState<Proposal|null>(null); const [hist,setHist]=useState<any>({actions:[],versions:[]}); const [busy,setBusy]=useState(false); const [err,setErr]=useState(''); const [docStatus,setDocStatus]=useState<ProposalDocumentStatus|null>(null);
+ async function load(){if(!id)return;const [a,b,c]=await Promise.all([proposalById(id),proposalHistory(id),proposalDocumentStatus(id).catch(()=>null)]);setP(a);setHist(b);setDocStatus(c)}
  useEffect(()=>{load()},[id]);
  const latestRevision=useMemo(()=>hist.actions.find((a:any)=>['SECRETARY_REVISION_REQUESTED','GS_REVISION_REQUESTED'].includes(a.action_type)),[hist.actions]);
  async function withdraw(){if(!confirm('هل تريد سحب هذا المقترح؟'))return;setBusy(true);setErr('');try{await workflow('PROPOSAL_WITHDRAW',{proposalId:id,reason:'سحب مقدم المقترح'});await load()}catch(e:any){setErr(e?.message||'تعذر سحب المقترح.')}finally{setBusy(false)}}
@@ -17,6 +17,8 @@ export default function MemberProposalDetailPage(){
   <Link to="/proposals" className="member-back"><ArrowRight size={17}/>العودة إلى مقترحاتي</Link>
   <div className="member-detail-head"><div><span className="member-kicker mono">{p.internal_id}</span><h1>{p.title}</h1><p>{p.secretariat?.name_ar} · النسخة {p.current_version}</p></div><div className={`member-status large status-${p.status.toLowerCase()}`}>{proposalStatusLabel[p.status]}</div></div>
   {err&&<div className="member-form-error member-banner">{err}</div>}
+  {hist.versions.length>0&&!hist.versions.some((v:any)=>v.version_no===p.current_version&&v.pdf_drive_file_id)&&<div className={`member-context-card ${docStatus?.jobStatus==='FAILED'?'attention':''}`}><div>{docStatus?.jobStatus==='FAILED'?<AlertTriangle size={19}/>:<RefreshCw size={19}/>}<span><strong>{docStatus?.jobStatus==='FAILED'?'تعذر تجهيز ملف PDF':'يتم تجهيز نسخة PDF الرسمية'}</strong><small>{docStatus?.jobStatus==='FAILED'?(docStatus.lastError||'حدث خطأ أثناء التوليد.'):'سيظهر هنا تلقائيًا بعد اكتمال تجهيز النموذج الرسمي.'}</small></span></div><button className="member-action-secondary" disabled={busy} onClick={async()=>{setBusy(true);setErr('');try{await workflow('PROPOSAL_DOCUMENT_RETRY',{proposalId:id});await load()}catch(e:any){setErr(e?.message||'تعذر إعادة تجهيز PDF.')}finally{setBusy(false)}}}>إعادة المحاولة</button></div>}
+
   {p.status==='DRAFT'&&<div className="member-context-card"><div><strong>هذه مسودة محفوظة</strong><span>يمكنك استكمالها وإرسالها عندما تكون جاهزًا.</span></div><Link className="member-action-primary" to={`/proposals/${p.id}/edit`}><Edit3 size={17}/>استكمال المسودة</Link></div>}
   {p.status==='REVISION_REQUESTED'&&<div className="member-context-card attention"><div><strong>المقترح يحتاج تعديلًا منك</strong><span>{latestRevision?.note_text||'راجع الملاحظات ثم أرسل النسخة المعدلة.'}</span></div><Link className="member-action-primary" to={`/proposals/${p.id}/edit`}><RotateCcw size={17}/>تعديل المقترح</Link></div>}
   <div className="member-detail-grid">
