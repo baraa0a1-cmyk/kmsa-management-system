@@ -1,10 +1,12 @@
-import { KeyRound, Mail, ShieldCheck, UserRound } from 'lucide-react';
+import { KeyRound, LogOut, Mail, ShieldCheck, UserRound } from 'lucide-react';
 import { FormEvent, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { workflow } from '../lib/api';
+import { signOut } from '../lib/auth';
 
 export default function MemberAccountPage(){
- const {profile,refreshProfile}=useAuth();
+ const {profile,refreshProfile}=useAuth(); const nav=useNavigate();
  const [email,setEmail]=useState(profile?.email||''); const [emailPass,setEmailPass]=useState('');
  const [currentPass,setCurrentPass]=useState(''); const [newPass,setNewPass]=useState(''); const [confirmPass,setConfirmPass]=useState('');
  const [emailBusy,setEmailBusy]=useState(false); const [passBusy,setPassBusy]=useState(false); const [emailMsg,setEmailMsg]=useState(''); const [passMsg,setPassMsg]=useState(''); const [emailErr,setEmailErr]=useState(''); const [passErr,setPassErr]=useState('');
@@ -18,5 +20,6 @@ export default function MemberAccountPage(){
    <form className="member-settings-card" onSubmit={changePassword}><div className="member-settings-title"><div className="member-settings-icon red"><KeyRound/></div><div><h2>تغيير كلمة السر</h2><p>استخدم كلمة سر قوية ومختلفة عن كلمات السر الأخرى.</p></div></div>{passErr&&<div className="member-form-error">{passErr}</div>}{passMsg&&<div className="member-form-success">{passMsg}</div>}<label>كلمة السر الحالية<input type="password" value={currentPass} onChange={e=>setCurrentPass(e.target.value)} required autoComplete="current-password"/></label><label>كلمة السر الجديدة<input type="password" value={newPass} onChange={e=>setNewPass(e.target.value)} required autoComplete="new-password"/></label><label>تأكيد كلمة السر الجديدة<input type="password" value={confirmPass} onChange={e=>setConfirmPass(e.target.value)} required autoComplete="new-password"/></label><button className="member-action-primary" disabled={passBusy}>{passBusy?'جارٍ الحفظ…':'تغيير كلمة السر'}</button></form>
   </div>
   <div className="member-security-note"><ShieldCheck size={17}/><span>كلمة السر لا تُحفظ في قاعدة بيانات الرابطة؛ يتم التعامل معها داخل نظام المصادقة فقط.</span></div>
+  <button className="member-account-logout" onClick={async()=>{await signOut();nav('/login')}}><LogOut size={17}/>تسجيل الخروج</button>
  </div>
 }

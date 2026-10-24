@@ -23,4 +23,6 @@ export async function audit(db:any,profile:any,action:string,entityType:string,e
 }
 export function canManageSecretariat(profile:any,secretariatId:string){return profile.role==='ADMIN'||(profile.role==='SECRETARY'&&profile.secretariat_id===secretariatId)}
 export function isGs(profile:any){return profile.role==='GS'||profile.role==='ADMIN'}
+export function hasOversight(profile:any){return ['GS','PRESIDENT','ADMIN'].includes(profile.role)}
+export function isPresident(profile:any){return profile.role==='PRESIDENT'||profile.role==='ADMIN'}
 export async function queueJob(db:any,jobType:string,entityType:string,entityId:string|null,payload:any={}){await db.from('background_jobs').insert({job_type:jobType,entity_type:entityType,entity_id:entityId,payload});}

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, CalendarDays, FileText, HandHeart, Megaphone, Sparkles } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { myProposals } from '../lib/api';
+import { ownProposals } from '../lib/api';
 import { useAuth } from '../hooks/useAuth';
 import { formatDate, proposalStatusLabel } from '../lib/labels';
 import type { Proposal } from '../lib/types';
@@ -10,7 +10,7 @@ export default function MemberHomePage(){
   const {profile}=useAuth();
   const [proposals,setProposals]=useState<Proposal[]>([]);
   const [loading,setLoading]=useState(true);
-  useEffect(()=>{myProposals().then(setProposals).finally(()=>setLoading(false))},[]);
+  useEffect(()=>{ownProposals().then(setProposals).finally(()=>setLoading(false))},[]);
   const firstName=(profile?.full_name||'').trim().split(/\s+/)[0]||'مرحبًا';
   const relevant=useMemo(()=>proposals.filter(p=>['DRAFT','REVISION_REQUESTED','WITH_SECRETARY','REVISED','WITH_GS'].includes(p.status)).slice(0,3),[proposals]);
   const drafts=proposals.filter(p=>p.status==='DRAFT').length;

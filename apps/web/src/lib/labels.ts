@@ -1,7 +1,7 @@
 import type { ExecutionStatus, MilestoneStatus, ProposalStatus, Role } from './types';
 
 export const roleLabel: Record<Role,string> = {
-  APPLICANT:'عضو عادي', MEMBER:'رئيس مكتب/لجنة', SECRETARY:'سكرتير', GS:'السكرتارية العامة', ADMIN:'مدير النظام'
+  APPLICANT:'عضو عادي', MEMBER:'رئيس مكتب/لجنة', SECRETARY:'سكرتير', GS:'السكرتير العام', PRESIDENT:'رئيس اللجنة التنفيذية', ADMIN:'مدير النظام'
 };
 export const proposalStatusLabel: Record<ProposalStatus,string> = {
   DRAFT:'مسودة', WITH_SECRETARY:'لدى السكرتير المختص', REVISION_REQUESTED:'يحتاج تعديلًا', REVISED:'تم رفع تعديل', WITH_GS:'لدى السكرتارية العامة', APPROVED:'مجاز', NOT_APPROVED:'غير مجاز', DEFERRED:'مؤجل', WITHDRAWN:'مسحوب'

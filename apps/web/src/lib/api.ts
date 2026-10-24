@@ -1,12 +1,11 @@
 import { supabase } from './supabase';
-import type { Blocker, Evidence, Intervention, Milestone, Plan, Profile, Proposal, Secretariat, WeeklyCommitment } from './types';
+import type { Blocker, Evidence, Initiative, Intervention, Milestone, Plan, Profile, ProjectBundle, ProjectIntervention, ProjectPermission, ProjectPermissionApproval, ProjectUpdate, Proposal, ResultItem, Secretariat, WeeklyCommitment } from './types';
 
 export async function currentProfile(): Promise<Profile> {
   const { data: auth } = await supabase.auth.getUser();
   if (!auth.user) throw new Error('UNAUTHORIZED');
   const { data, error } = await supabase.from('profiles').select('*').eq('auth_user_id', auth.user.id).single();
-  if (error) throw error;
-  return data;
+  if (error) throw error; return data;
 }
 export async function secretariats(): Promise<Secretariat[]> {
   const { data, error } = await supabase.from('secretariats').select('*').eq('active', true).order('name_ar');
@@ -15,6 +14,11 @@ export async function secretariats(): Promise<Secretariat[]> {
 export async function myProposals(): Promise<Proposal[]> {
   const { data, error } = await supabase.from('proposals').select('*, secretariat:secretariats(*)').order('updated_at', {ascending:false});
   if (error) throw error; return data || [];
+}
+export async function ownProposals(): Promise<Proposal[]> {
+  const p=await currentProfile();
+  const { data, error } = await supabase.from('proposals').select('*, secretariat:secretariats(*)').eq('applicant_id',p.id).order('updated_at',{ascending:false});
+  if(error) throw error; return data||[];
 }
 export async function proposalById(id:string) {
   const { data, error } = await supabase.from('proposals').select('*, secretariat:secretariats(*)').eq('id', id).single();
@@ -51,6 +55,36 @@ export async function milestoneBundle(id:string): Promise<{ milestone: Milestone
   for (const r of [m,c,e,b,i,v]) if(r.error) throw r.error;
   return {milestone:m.data as Milestone, commitments:c.data as WeeklyCommitment[], evidence:e.data as Evidence[], blockers:b.data as Blocker[], interventions:i.data as Intervention[], verifications:v.data || []};
 }
+
+export async function workspaceProjects(): Promise<Initiative[]> {
+  const {data,error}=await supabase.from('initiatives').select('*,secretariat:secretariats(*),owner:profiles!initiatives_owner_id_fkey(id,full_name),secretary:profiles!initiatives_secretary_id_fkey(id,full_name)').order('updated_at',{ascending:false});
+  if(error) throw error; return (data||[]) as Initiative[];
+}
+export async function workspaceProject(id:string): Promise<ProjectBundle> {
+  const [i,r,m,u,p,pi,b,o]=await Promise.all([
+    supabase.from('initiatives').select('*,secretariat:secretariats(*),owner:profiles!initiatives_owner_id_fkey(id,full_name),secretary:profiles!initiatives_secretary_id_fkey(id,full_name)').eq('id',id).single(),
+    supabase.from('results').select('*,owner:profiles!results_owner_id_fkey(id,full_name)').eq('initiative_id',id).order('created_at'),
+    supabase.from('milestones').select('*,owner:profiles!milestones_owner_id_fkey(id,full_name),result:results(*)').order('due_at'),
+    supabase.from('project_updates').select('*,author:profiles(full_name)').eq('initiative_id',id).order('created_at',{ascending:false}),
+    supabase.from('project_permissions').select('*,target_secretariat:secretariats!project_permissions_target_secretariat_id_fkey(*),requester:profiles!project_permissions_requested_by_fkey(id,full_name),approvals:project_permission_approvals(*)').eq('initiative_id',id).order('created_at'),
+    supabase.from('project_interventions').select('*,secretary:profiles!project_interventions_secretary_id_fkey(id,full_name)').eq('initiative_id',id).order('created_at',{ascending:false}),
+    supabase.from('blockers').select('*').eq('status','OPEN').order('created_at',{ascending:false}),
+    supabase.from('oversight_notes').select('*,creator:profiles!oversight_notes_created_by_fkey(id,full_name)').eq('initiative_id',id).order('created_at',{ascending:false})
+  ]);
+  for(const x of [i,r,m,u,p,pi,b,o]) if(x.error) throw x.error;
+  const resultIds=(r.data||[]).map((x:any)=>x.id); const projectMilestones=(m.data||[]).filter((x:any)=>resultIds.includes(x.result_id)); const milestoneIds=projectMilestones.map((x:any)=>x.id); const blockers=(b.data||[]).filter((x:any)=>milestoneIds.includes(x.milestone_id));
+  return {initiative:i.data as Initiative,results:(r.data||[]) as ResultItem[],milestones:projectMilestones as Milestone[],updates:(u.data||[]) as ProjectUpdate[],permissions:(p.data||[]) as ProjectPermission[],interventions:(pi.data||[]) as ProjectIntervention[],blockers,oversight:o.data||[]};
+}
+export async function projectPermissionsPending(): Promise<(ProjectPermissionApproval & {permission:ProjectPermission})[]> {
+  const {data,error}=await supabase.rpc('permission_approval_queue');if(error)throw error;return (data||[]) as any;
+}
+export async function workspaceAttention(){const {data,error}=await supabase.rpc('workspace_attention_snapshot');if(error)throw error;return (data||[]) as any[];}
+export async function proposalExecutionProject(proposalId:string):Promise<Initiative|null>{const {data,error}=await supabase.from('initiatives').select('*,secretariat:secretariats(*),owner:profiles!initiatives_owner_id_fkey(id,full_name),secretary:profiles!initiatives_secretary_id_fkey(id,full_name)').eq('proposal_id',proposalId).maybeSingle();if(error)throw error;return (data||null) as Initiative|null;}
+export async function staffProfiles(secretariatId?:string): Promise<Profile[]> {
+  let q=supabase.from('profiles').select('*').eq('active',true).in('role',['MEMBER','SECRETARY']);if(secretariatId)q=q.eq('secretariat_id',secretariatId);const {data,error}=await q.order('full_name');if(error)throw error;return (data||[]) as Profile[];
+}
+export async function executiveSnapshot(){const {data,error}=await supabase.rpc('executive_workspace_snapshot');if(error)throw error;return data||{};}
+
 export async function weeklyReport(weekStart?:string) {
   const { data,error }=await supabase.rpc('weekly_report',{p_week_start:weekStart||null}); if(error) throw error; return data||[];
 }

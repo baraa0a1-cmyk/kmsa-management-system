@@ -1,7 +1,7 @@
 import { Download, FilePlus2, Search, Upload, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { downloadTemplate, myProposals, secretariats, uploadToStaging, workflow } from '../lib/api';
+import { downloadTemplate, ownProposals, secretariats, uploadToStaging, workflow } from '../lib/api';
 import { formatDate, proposalStatusLabel } from '../lib/labels';
 import type { Proposal, Secretariat } from '../lib/types';
 import { Modal } from '../components/Modal';
@@ -11,7 +11,7 @@ export default function MemberProposalsPage(){
  const [searchParams,setSearchParams]=useSearchParams();
  const [items,setItems]=useState<Proposal[]>([]); const [secs,setSecs]=useState<Secretariat[]>([]); const [query,setQuery]=useState(''); const [open,setOpen]=useState(searchParams.get('upload')==='1'); const [file,setFile]=useState<File|null>(null); const [busy,setBusy]=useState(false); const [stage,setStage]=useState(''); const [error,setError]=useState(''); const [success,setSuccess]=useState(searchParams.get('saved')==='1'?'تم حفظ المسودة بنجاح. يمكنك العودة إليها في أي وقت.':'');
  const [form,setForm]=useState<any>({title:'',applicantName:'',applicantEmail:'',secretariatId:'',neededBy:''});
- async function load(){setItems(await myProposals())}
+ async function load(){setItems(await ownProposals())}
  useEffect(()=>{load();secretariats().then(setSecs)},[]);
  useEffect(()=>{if(searchParams.get('upload')==='1')setOpen(true)},[searchParams]);
  const tab=searchParams.get('tab')||'all';

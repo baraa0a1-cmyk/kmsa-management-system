@@ -22,7 +22,7 @@
 
 ## الأدوار المقبولة
 
-`APPLICANT | MEMBER | SECRETARY | GS | ADMIN`
+`APPLICANT | MEMBER | SECRETARY | GS | PRESIDENT | ADMIN`
 
 ## ما سنفعله عندما ترفع الملف
 

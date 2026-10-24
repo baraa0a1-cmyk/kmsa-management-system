@@ -2,21 +2,20 @@
 
 ## الهوية
 - دخول بالبريد أو الرقم الجامعي + كلمة السر.
-- أدوار APPLICANT / MEMBER / SECRETARY / GS / ADMIN.
+- أدوار APPLICANT / MEMBER / SECRETARY / GS / PRESIDENT / ADMIN.
 - إجبار الحسابات المستوردة على تغيير كلمة المرور أول مرة.
 
 ## إدارة العمل
-- Plans.
-- Initiatives.
-- Results.
-- Milestones.
-- Weekly Commitments.
+- بوابة عضو منفصلة عن مساحة العمل.
+- Projects تبدأ بنتيجة ومسؤول وموعد، ثم قبول التكليف وتصميم Milestones مشترك.
+- Standard + Special project permissions مع موافقات cross-secretariat / Executive Committee.
+- Project reality updates + next check + assistance requests.
 - Evidence نصي/رابط/ملف.
-- Blockers.
-- Secretary Interventions.
-- Verification.
-- GS Oversight Notes.
-- SLA/Overdue monitoring.
+- Blockers + Secretary early interventions.
+- Verification بواسطة السكرتير.
+- GS/President oversight مع إشارات مسؤولية مبكرة.
+- متابعة دورية مشتقة من البيانات بدل تقرير موازٍ.
+- SLA/early-warning/overdue monitoring.
 
 ## المقترحات
 - Structured proposal.
@@ -25,8 +24,8 @@
 - Full edit/versioning.
 - Secretary review/revision/forward.
 - GS approve/reject/defer/revision.
-- Execution status منفصل.
-- Approved proposal → Initiative.
+- Approved proposal → execution project يحتاج تهيئة النتيجة والمسؤول والموعد قبل بدء التنفيذ.
+- اكتمال التنفيذ مشتق من Milestones المعتمدة بدل زر يدوي مستقل.
 
 ## الحوكمة
 - Meetings.
