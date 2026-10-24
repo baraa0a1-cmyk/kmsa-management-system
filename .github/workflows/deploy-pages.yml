@@ -31,6 +31,8 @@ jobs:
         run: npm ci
       - name: Verify v5 monitoring invariants
         run: node ../../scripts/v5-static-check.mjs
+      - name: Verify v5.1 project follow-up invariants
+        run: node ../../scripts/v5-followup-check.mjs
       - name: Build
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}

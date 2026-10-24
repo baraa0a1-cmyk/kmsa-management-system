@@ -17,7 +17,14 @@ check('Director sees actionable priority and backend read failures',home.include
 check('Pending GS assignment approvals are actionable on home',home.includes("p.approval_status==='PENDING_GS'")&&home.includes("p.approval_status==='RETURNED'"));
 check('GS oversight and report paths',app.includes('/workspace/oversight')&&app.includes('/workspace/reports'));
 check('Project requires periodic progress and next step',workflow.includes("PROJECT_UPDATE_ADD")&&workflow.includes('progressNote')&&workflow.includes('nextStep')&&workflow.includes('next_update_due_at'));
-check('Project cannot self-declare green while blocker open',workflow.includes("health==='ON_TRACK'&&hasOpenBlocker"));
+const healthCalculator=workflow.match(/async function computedProjectHealth\(db:any,initiativeId:string\)\s*\{([\s\S]*?)\n\}/)?.[1]||'';
+check('Project health is server-derived and blockers take precedence',
+  healthCalculator.includes(".eq('status','OPEN')") &&
+  healthCalculator.includes("m.status==='BLOCKED'") &&
+  healthCalculator.indexOf("return 'BLOCKED'") < healthCalculator.lastIndexOf("return 'ON_TRACK'") &&
+  workflow.includes('const health=await computedProjectHealth(db,init.id)') &&
+  !workflow.includes('const health=payload.health'));
+
 check('Cancelled milestones cannot count as verified',workflow.includes("active.every((m:any)=>m.status==='VERIFIED')"));
 check('Secretary intervention requires an actual action',workflow.includes('حدد إجراء التدخل الذي نفذته'));
 check('MILESTONE evidence waits for Drive archive',!workflow.includes("await db.from('milestones').update({status:'READY_FOR_VERIFICATION'}).eq('id',m.id);await audit(db,profile,'EVIDENCE_FILE_QUEUED'"));
@@ -28,7 +35,11 @@ check('Retries preserve uploaded file identity',workflow.includes("if(v.source==
 check('Unfinished recurring duty does not silently advance',workflow.includes("if(status==='COMPLETED'){const advance="));
 check('Stuck jobs recovered and personal reminders exist',monitor.includes('Recovered after worker timeout')&&monitor.includes('PROJECT_UPDATE_OVERDUE'));
 check('Roles data typed rather than optional quick task key fields',types.includes('task_id:string; id?:string'));
-check('Failed periodic update preserves user input',file('apps/web/src/pages/WorkspaceProjectPage.tsx').includes('if(saved)setProjectReport'));
+const projectPage=file('apps/web/src/pages/WorkspaceProjectPage.tsx');
+check('Failed periodic update preserves user input',
+  /if\s*\(await act\('PROJECT_UPDATE_ADD',[\s\S]*?\)\)\s*\{\s*setReport\(''\)/.test(projectPage) &&
+  /catch\s*\(e:any\)\s*\{setError\([^;]+;return false\}/.test(projectPage));
+
 check('File evidence upload reports archival pending',file('apps/web/src/pages/MilestonePage.tsx').includes('لن تصبح المحطة جاهزة للتحقق إلا بعد حفظ الملف'));
 check('Evidence retries keyed by upload identity, never free-text note',worker.includes(".eq('source_storage_path',body.storage_path)")&&!worker.includes(".eq('note',body.note||null)"));
 check('Drive Bridge deduplicates using source upload UUID',file('google-apps-script/DriveBridge.gs').includes('uploadKey')&&file('google-apps-script/DriveBridge.gs').includes('LockService.getScriptLock'));
