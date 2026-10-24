@@ -35,7 +35,7 @@ export async function queueJob(db:any,jobType:string,entityType:string,entityId:
 }
 export async function inboxNotify(db:any,profileId:string,eventType:string,title:string,body:string|null,entityType:string|null,entityId:string|null,actionPath:string|null){
  if(!profileId)return;
- const since=new Date(Date.now()-10*60*1000).toISOString();
+ const cooldown=eventType.includes('DUE_SOON')?12:24;const since=new Date(Date.now()-cooldown*60*60*1000).toISOString();
  const q=await db.from('user_notifications').select('id').eq('profile_id',profileId).eq('event_type',eventType).eq('entity_type',entityType).eq('entity_id',entityId).gte('created_at',since).limit(1).maybeSingle();
  if(q.data)return;
  await db.from('user_notifications').insert({profile_id:profileId,event_type:eventType,title,body,entity_type:entityType,entity_id:entityId,action_path:actionPath});

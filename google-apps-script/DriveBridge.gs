@@ -108,10 +108,17 @@ function archiveUpload_(body){
 }
 
 function archiveGeneric_(body){
-  const root=DriveApp.getFolderById(props_().getProperty('ARCHIVE_ROOT_FOLDER_ID'));
-  const category=getOrCreateFolder_(root,sanitize_(body.category||'General Files'));
-  const entity=getOrCreateFolder_(category,sanitize_((body.entityId||'entity')+' - '+(body.entityTitle||'')));
-  const bytes=Utilities.base64Decode(String(body.base64||'')); const mime=String(body.mimeType||'application/octet-stream');
-  const file=entity.createFile(Utilities.newBlob(bytes,mime,sanitize_(body.fileName||'attachment')));
-  return {ok:true,fileId:file.getId(),fileName:file.getName(),folderId:entity.getId()};
+  const lock=LockService.getScriptLock();lock.waitLock(30000);
+  try{
+    const root=DriveApp.getFolderById(props_().getProperty('ARCHIVE_ROOT_FOLDER_ID'));
+    const category=getOrCreateFolder_(root,sanitize_(body.category||'General Files'));
+    const entity=getOrCreateFolder_(category,sanitize_((body.entityId||'entity')+' - '+(body.entityTitle||'')));
+    // uploadKey is the immutable UUID storage basename. Never dedupe merely by note or user file name.
+    const key=String(body.uploadKey||'').replace(/[^a-zA-Z0-9_-]/g,'').slice(0,75);
+    const fileName=sanitize_(key?'EVIDENCE_'+key+'__'+(body.fileName||'attachment'):(body.fileName||'attachment'));
+    if(key){const files=entity.getFilesByName(fileName);if(files.hasNext()){const previous=files.next();return {ok:true,fileId:previous.getId(),fileName:previous.getName(),folderId:entity.getId(),reused:true};}}
+    const bytes=Utilities.base64Decode(String(body.base64||''));const mime=String(body.mimeType||'application/octet-stream');
+    const file=entity.createFile(Utilities.newBlob(bytes,mime,fileName));
+    return {ok:true,fileId:file.getId(),fileName:file.getName(),folderId:entity.getId()};
+  }finally{lock.releaseLock();}
 }

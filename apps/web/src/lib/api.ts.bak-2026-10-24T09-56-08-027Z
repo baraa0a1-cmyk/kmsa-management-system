@@ -1,0 +1,143 @@
+import { supabase } from './supabase';
+import type { Blocker, Evidence, Initiative, Intervention, MemberDirectoryItem, Milestone, Plan, Profile, ProjectBundle, ProjectIntervention, ProjectPermission, ProjectPermissionApproval, ProjectSheetRow, ProjectUpdate, Proposal, ProposalDocumentStatus, ProposalSheetRow, ResultItem, RoutineObligationRow, Secretariat, WeeklyCommitment, OrgStructureSnapshot } from './types';
+
+export async function currentProfile(): Promise<Profile> {
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth.user) throw new Error('UNAUTHORIZED');
+  const { data, error } = await supabase.from('profiles').select('*,secretariat:secretariats(*)').eq('auth_user_id', auth.user.id).single();
+  if (error) throw error; return data;
+}
+export async function secretariats(): Promise<Secretariat[]> {
+  const { data, error } = await supabase.from('secretariats').select('*').eq('active', true).order('name_ar');
+  if (error) throw error; return data || [];
+}
+export async function myProposals(): Promise<Proposal[]> {
+  const { data, error } = await supabase.from('proposals').select('*, secretariat:secretariats(*)').order('updated_at', {ascending:false});
+  if (error) throw error; return data || [];
+}
+export async function ownProposals(): Promise<Proposal[]> {
+  const p=await currentProfile();
+  const { data, error } = await supabase.from('proposals').select('*, secretariat:secretariats(*)').eq('applicant_id',p.id).order('updated_at',{ascending:false});
+  if(error) throw error; return data||[];
+}
+export async function proposalById(id:string) {
+  const { data, error } = await supabase.from('proposals').select('*, secretariat:secretariats(*)').eq('id', id).single();
+  if (error) throw error; return data as Proposal;
+}
+export async function proposalHistory(id:string) {
+  const [actions, versions, attachments] = await Promise.all([
+    supabase.from('proposal_actions').select('*, actor:profiles(full_name,role)').eq('proposal_id',id).order('created_at',{ascending:false}),
+    supabase.from('proposal_versions').select('*').eq('proposal_id',id).order('version_no',{ascending:false}),
+    supabase.from('file_assets').select('*').eq('entity_type','PROPOSAL').eq('entity_id',id).order('created_at',{ascending:false})
+  ]);
+  if (actions.error) throw actions.error; if (versions.error) throw versions.error; if (attachments.error) throw attachments.error;
+  return { actions: actions.data || [], versions: versions.data || [], attachments: attachments.data || [] };
+}
+export async function workflow(action:string, payload:any={}) {
+  const { data, error } = await supabase.functions.invoke('workflow',{body:{action,payload}});
+  if (error) throw error; if (data?.error) throw new Error(data.error); return data;
+}
+export async function plans(): Promise<Plan[]> {
+  const { data, error } = await supabase.from('plans').select('*').order('created_at',{ascending:false}); if(error) throw error; return data||[];
+}
+export async function milestones(): Promise<Milestone[]> {
+  const { data,error }=await supabase.from('milestones').select('*, result:results(*), owner:profiles!milestones_owner_id_fkey(id,full_name)').order('due_at',{ascending:true}); if(error) throw error; return data||[];
+}
+export async function milestoneBundle(id:string): Promise<{ milestone: Milestone; commitments: WeeklyCommitment[]; evidence: Evidence[]; blockers: Blocker[]; interventions: Intervention[]; verifications: any[] }> {
+  const [m,c,e,b,i,v] = await Promise.all([
+    supabase.from('milestones').select('*, result:results(*), owner:profiles!milestones_owner_id_fkey(id,full_name)').eq('id',id).single(),
+    supabase.from('weekly_commitments').select('*').eq('milestone_id',id).order('week_start',{ascending:false}),
+    supabase.from('milestone_evidence').select('*').eq('milestone_id',id).order('created_at',{ascending:false}),
+    supabase.from('blockers').select('*').eq('milestone_id',id).order('created_at',{ascending:false}),
+    supabase.from('interventions').select('*, secretary:profiles(full_name)').eq('milestone_id',id).order('created_at',{ascending:false}),
+    supabase.from('verifications').select('*, verifier:profiles(full_name)').eq('milestone_id',id).order('created_at',{ascending:false})
+  ]);
+  for (const r of [m,c,e,b,i,v]) if(r.error) throw r.error;
+  return {milestone:m.data as Milestone, commitments:c.data as WeeklyCommitment[], evidence:e.data as Evidence[], blockers:b.data as Blocker[], interventions:i.data as Intervention[], verifications:v.data || []};
+}
+
+export async function workspaceProjects(): Promise<Initiative[]> {
+  const {data,error}=await supabase.from('initiatives').select('*,secretariat:secretariats(*),owner:profiles!initiatives_owner_id_fkey(id,full_name),secretary:profiles!initiatives_secretary_id_fkey(id,full_name)').order('updated_at',{ascending:false});
+  if(error) throw error; return (data||[]) as Initiative[];
+}
+export async function workspaceProject(id:string): Promise<ProjectBundle> {
+  const [i,r,m,u,p,pi,b,o]=await Promise.all([
+    supabase.from('initiatives').select('*,secretariat:secretariats(*),owner:profiles!initiatives_owner_id_fkey(id,full_name),secretary:profiles!initiatives_secretary_id_fkey(id,full_name)').eq('id',id).single(),
+    supabase.from('results').select('*,owner:profiles!results_owner_id_fkey(id,full_name)').eq('initiative_id',id).order('created_at'),
+    supabase.from('milestones').select('*,owner:profiles!milestones_owner_id_fkey(id,full_name),result:results(*)').order('sequence_no').order('due_at'),
+    supabase.from('project_updates').select('*,author:profiles(full_name)').eq('initiative_id',id).order('created_at',{ascending:false}),
+    supabase.from('project_permissions').select('*,target_secretariat:secretariats!project_permissions_target_secretariat_id_fkey(*),requester:profiles!project_permissions_requested_by_fkey(id,full_name),approvals:project_permission_approvals(*)').eq('initiative_id',id).order('created_at'),
+    supabase.from('project_interventions').select('*,secretary:profiles!project_interventions_secretary_id_fkey(id,full_name)').eq('initiative_id',id).order('created_at',{ascending:false}),
+    supabase.from('blockers').select('*').eq('status','OPEN').order('created_at',{ascending:false}),
+    supabase.from('oversight_notes').select('*,creator:profiles!oversight_notes_created_by_fkey(id,full_name)').eq('initiative_id',id).order('created_at',{ascending:false})
+  ]);
+  for(const x of [i,r,m,u,p,pi,b,o]) if(x.error) throw x.error;
+  const resultIds=(r.data||[]).map((x:any)=>x.id); const projectMilestones=(m.data||[]).filter((x:any)=>resultIds.includes(x.result_id)); const milestoneIds=projectMilestones.map((x:any)=>x.id); const blockers=(b.data||[]).filter((x:any)=>milestoneIds.includes(x.milestone_id));
+  return {initiative:i.data as Initiative,results:(r.data||[]) as ResultItem[],milestones:projectMilestones as Milestone[],updates:(u.data||[]) as ProjectUpdate[],permissions:(p.data||[]) as ProjectPermission[],interventions:(pi.data||[]) as ProjectIntervention[],blockers,oversight:o.data||[]};
+}
+export async function projectPermissionsPending(): Promise<(ProjectPermissionApproval & {permission:ProjectPermission})[]> {
+  const {data,error}=await supabase.rpc('permission_approval_queue');if(error)throw error;return (data||[]) as any;
+}
+export async function workspaceAttention(){const {data,error}=await supabase.rpc('workspace_attention_snapshot');if(error)throw error;return (data||[]) as any[];}
+export async function proposalExecutionProject(proposalId:string):Promise<Initiative|null>{const {data,error}=await supabase.from('initiatives').select('*,secretariat:secretariats(*),owner:profiles!initiatives_owner_id_fkey(id,full_name),secretary:profiles!initiatives_secretary_id_fkey(id,full_name)').eq('proposal_id',proposalId).maybeSingle();if(error)throw error;return (data||null) as Initiative|null;}
+export async function staffProfiles(secretariatId?:string): Promise<Profile[]> {
+  let q=supabase.from('profiles').select('*').eq('active',true).in('role',['MEMBER','SECRETARY']);if(secretariatId)q=q.eq('secretariat_id',secretariatId);const {data,error}=await q.order('full_name');if(error)throw error;return (data||[]) as Profile[];
+}
+export async function executiveSnapshot(){const {data,error}=await supabase.rpc('executive_workspace_snapshot');if(error)throw error;return data||{};}
+
+
+
+export async function organizationStructure(secretariatId?: string): Promise<OrgStructureSnapshot> {
+  const payload = secretariatId ? { secretariatId } : {};
+  const data = await workflow('ORG_STRUCTURE_SNAPSHOT', payload);
+  return {
+    secretariat: data?.secretariat ?? null,
+    secretary: data?.secretary ?? null,
+    bodies: Array.isArray(data?.bodies) ? data.bodies : [],
+    positions: Array.isArray(data?.positions) ? data.positions : [],
+    memberships: Array.isArray(data?.memberships) ? data.memberships : [],
+    appointments: Array.isArray(data?.appointments) ? data.appointments : [],
+  } as OrgStructureSnapshot;
+}
+
+export async function memberDirectorySearch(query=''): Promise<MemberDirectoryItem[]> {
+  const {data,error}=await supabase.rpc('member_directory_search',{p_query:query}); if(error)throw error; return (data||[]) as MemberDirectoryItem[];
+}
+export async function workspaceProjectSheet(): Promise<ProjectSheetRow[]> {
+  const {data,error}=await supabase.rpc('workspace_project_sheet'); if(error)throw error; return (data||[]) as ProjectSheetRow[];
+}
+export async function proposalTrackingSheet(): Promise<ProposalSheetRow[]> {
+  const {data,error}=await supabase.rpc('proposal_tracking_sheet'); if(error)throw error; return (data||[]) as ProposalSheetRow[];
+}
+
+export async function routineObligationSheet(): Promise<RoutineObligationRow[]> {
+  const {data,error}=await supabase.rpc('routine_obligation_sheet'); if(error)throw error; return (data||[]) as RoutineObligationRow[];
+}
+export async function proposalDocumentStatus(proposalId:string): Promise<ProposalDocumentStatus> {
+  const {data,error}=await supabase.rpc('proposal_document_status',{p_proposal_id:proposalId}); if(error)throw error; return (data||{}) as ProposalDocumentStatus;
+}
+
+export function exportCsv(fileName:string, rows:Record<string,any>[], columns:{key:string;label:string}[]){
+  const esc=(v:any)=>`"${String(v??'').replace(/"/g,'""')}"`;
+  const lines=[columns.map(c=>esc(c.label)).join(','),...rows.map(r=>columns.map(c=>esc(r[c.key])).join(','))];
+  const blob=new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv;charset=utf-8;'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=fileName.endsWith('.csv')?fileName:fileName+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+export async function copyTableTsv(rows:Record<string,any>[], columns:{key:string;label:string}[]){
+  const clean=(v:any)=>String(v??'').replace(/[\t\r\n]+/g,' ').trim();
+  const text=[columns.map(c=>clean(c.label)).join('\t'),...rows.map(r=>columns.map(c=>clean(r[c.key])).join('\t'))].join('\n');
+  await navigator.clipboard.writeText(text);return rows.length;
+}
+
+export async function weeklyReport(weekStart?:string) {
+  const { data,error }=await supabase.rpc('weekly_report',{p_week_start:weekStart||null}); if(error) throw error; return data||[];
+}
+export async function dashboardMetrics() {
+  const { data,error }=await supabase.rpc('dashboard_metrics'); if(error) throw error; return data||{};
+}
+
+function saveBase64File(fileName:string,mimeType:string,base64:string){
+ const bytes=Uint8Array.from(atob(base64),c=>c.charCodeAt(0)); const blob=new Blob([bytes],{type:mimeType||'application/octet-stream'}); const url=URL.createObjectURL(blob); const a=document.createElement('a');a.href=url;a.download=fileName||'download';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+export async function downloadDriveFile(driveFileId:string){const d=await workflow('FILE_DOWNLOAD',{driveFileId});saveBase64File(d.fileName,d.mimeType,d.base64)}
+export async function downloadTemplate(){const d=await workflow('TEMPLATE_DOWNLOAD',{});saveBase64File(d.fileName,d.mimeType,d.base64)}
+export async function uploadToStaging(file:File){const {data:{user}}=await supabase.auth.getUser();if(!user)throw new Error('UNAUTHORIZED');const safe=file.name.replace(/[^\w.\-\u0600-\u06FF]+/g,'_');const path=`${user.id}/${crypto.randomUUID()}-${safe}`;const ext=file.name.split('.').pop()?.toLowerCase();const inferred=ext==='pdf'?'application/pdf':ext==='docx'?'application/vnd.openxmlformats-officedocument.wordprocessingml.document':file.type||'application/octet-stream';const {error}=await supabase.storage.from('staging').upload(path,file,{upsert:false,contentType:inferred});if(error)throw new Error(error.message||'تعذر رفع الملف مؤقتًا.');return path}

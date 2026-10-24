@@ -23,7 +23,7 @@ export interface Cycle { id: string; code: string; name: string; is_current: boo
 
 export interface Proposal {
   id: string; internal_id: string; title: string; applicant_id: string; applicant_name: string; applicant_email: string;
-  secretariat_id: string; proposal_type?: string; submission_mode?: string; status: ProposalStatus; execution_status: ExecutionStatus; current_version: number;
+  secretariat_id: string; status: ProposalStatus; execution_status: ExecutionStatus; current_version: number;
   submitted_at: string | null; needed_by: string | null; urgency: string | null; proposed_period: string | null;
   primary_beneficiaries: string | null; trigger_reality: string | null; primary_benefit: string | null;
   secondary_benefits: string | null; intervention: string | null; success_criterion: string | null;
@@ -77,29 +77,83 @@ export interface MemberDirectoryItem { id:string; full_name:string; university_i
 
 export interface RoutineObligationRow {
   obligation_id:string; secretariat_id:string; secretariat_name:string; title:string; description:string|null; expected_output:string|null;
-  owner_id:string; owner_name:string; secretary_id:string|null; secretary_name:string|null; cadence:'WEEKLY'|'MONTHLY'|'QUARTERLY'|'CUSTOM'|string; interval_days:number|null;
+  owner_id:string; owner_name:string; secretary_id:string|null; secretary_name:string|null; cadence:'WEEKLY'|'MONTHLY'|'QUARTERLY'|'CUSTOM'|string;
   next_due_at:string; overdue:boolean; days_to_due:number; last_status:string|null; last_report:string|null; last_output:string|null;
-  last_secretary_note:string|null; last_submitted_at:string|null; source_type?:string; position_title?:string|null; scope_label?:string|null; duty_template_id?:string|null; position_assignment_id?:string|null;
+  last_secretary_note:string|null; last_submitted_at:string|null; source_type?:string|null;position_title?:string|null;scope_label?:string|null;source_id?:string|null;
 }
 export interface ProposalDocumentStatus {
   pdfReady:boolean; pdfDriveFileId:string|null; docxDriveFileId:string|null; jobStatus:string; lastError:string|null; attempts:number; updatedAt:string|null;
 }
 
-export interface OperationalPositionRow {
-  position_id:string; secretariat_id:string; secretariat_name:string; title:string; description:string|null; active:boolean;
-  active_people:number; active_duties:number; active_events:number;
+
+// KMSA compatibility type
+export interface UserNotification {
+  [key:string]: any;
+  id:string; event_type:string; title:string; body:string|null; entity_type:string|null; entity_id:string|null;
+  action_path:string|null; created_at:string; read_at:string|null;
 }
-export interface PositionAssignment { id:string; position_id:string; profile_id:string; scope_label:string|null; starts_at:string; ends_at:string|null; active:boolean; created_at:string; profile?:Pick<Profile,'id'|'full_name'|'university_id'>; }
-export interface PositionDutyTemplate { id:string; position_id:string; title:string; description:string|null; expected_output:string|null; interval_days:number; first_due_after_days:number; active:boolean; created_at:string; updated_at:string; }
+
+
+
+// KMSA compatibility type
 export interface QuickTaskRow {
-  task_id:string; secretariat_id:string; secretariat_name:string; title:string; description:string|null; assignee_id:string; assignee_name:string;
-  assigned_by:string; assigned_by_name:string; due_at:string|null; priority:string; status:string; assignee_note:string|null; secretary_note:string|null;
+  [key:string]: any;
+  task_id:string; id?:string; secretariat_id:string; secretariat_name:string; title:string; description:string|null;
+  assignee_id:string; assignee_name:string; assigned_by:string; assigned_by_name:string;
+  due_at:string|null; priority:string; status:string; assignee_note:string|null; secretary_note:string|null;
   evidence_url:string|null; overdue:boolean; days_to_due:number|null; created_at:string; updated_at:string;
 }
-export interface WorkEventRow {
-  event_id:string; secretariat_id:string; secretariat_name:string; title:string; position_id:string|null; position_title:string|null;
-  scheduled_at:string; status:string; notes:string|null; outcomes:string|null; total_people:number; present_count:number; absent_count:number; excused_count:number; pending_count:number;
+
+
+
+// KMSA compatibility type
+export interface ReadinessSnapshot {
+  [key:string]: any;
+  ready?: boolean; critical_count?: number; warning_count?: number; projects_needing_attention?: number;
+  secretary_response_needed?: number; overdue_routines?: number; overdue_tasks?: number; overdue_proposals?: number; failed_document_jobs?: number; stuck_jobs?: number;
 }
-export interface EventAttendance { id:string; event_id:string; profile_id:string; assignment_id:string|null; status:'PENDING'|'PRESENT'|'ABSENT'|'EXCUSED'; note:string|null; recorded_at:string|null; profile?:Pick<Profile,'id'|'full_name'|'university_id'>; }
-export interface UserNotification { id:string; event_type:string; title:string; body:string|null; entity_type:string|null; entity_id:string|null; action_path:string|null; read_at:string|null; created_at:string; }
-export interface ReadinessSnapshot { pending_document_jobs:number; failed_document_jobs:number; stuck_document_jobs:number; projects_needing_attention:number; projects_without_recent_secretary_response:number; overdue_routine:number; overdue_tasks:number; overdue_proposals:number; }
+
+
+// KMSA compatibility type
+export interface OperationalPositionRow {
+  [key:string]: any;
+  id?: string; position_id:string; secretariat_id:string; secretariat_name:string; title:string; scope_label?: string | null; active?: boolean;
+  assignee_id?: string | null; assignee_name?: string | null; created_at?: string; updated_at?: string;
+}
+
+
+// KMSA compatibility type
+export interface PositionAssignment {
+  [key:string]: any;
+  id?: string; position_id?: string; profile_id?: string; assignee_id?: string; assignee_name?: string; scope_label?: string | null;
+  starts_at?: string | null; ends_at?: string | null; active?: boolean; status?: string; created_at?: string;
+}
+
+
+// KMSA compatibility type
+export interface PositionDutyTemplate {
+  [key:string]: any;
+  id:string; position_id:string; title:string; description?: string | null; expected_output?: string | null; cadence?: string; interval_days:number; first_due_after_days:number; active?: boolean;
+}
+
+
+// KMSA compatibility type
+export interface PositionEventTemplate {
+  [key:string]: any;
+  id?: string; position_id?: string; title?: string; description?: string | null; cadence?: string; interval_days?: number | null; active?: boolean;
+}
+
+
+// KMSA compatibility type
+export interface WorkEventRow {
+  [key:string]: any;
+  event_id?: string; id?: string; secretariat_id?: string; secretariat_name?: string; title?: string; starts_at?: string | null; due_at?: string | null;
+  owner_id?: string | null; owner_name?: string | null; status?: string; participant_count?: number; attended_count?: number; absent_count?: number; excused_count?: number;
+}
+
+
+// KMSA compatibility type
+export interface EventAttendance {
+  [key:string]: any;
+  id?: string; event_id?: string; profile_id?: string; attendee_id?: string; attendee_name?: string; status?: string; note?: string | null; recorded_at?: string | null;
+}

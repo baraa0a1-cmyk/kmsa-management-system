@@ -86,6 +86,7 @@ export async function staffProfiles(secretariatId?:string): Promise<Profile[]> {
 export async function executiveSnapshot(){const {data,error}=await supabase.rpc('executive_workspace_snapshot');if(error)throw error;return data||{};}
 
 
+
 export async function memberDirectorySearch(query=''): Promise<MemberDirectoryItem[]> {
   const {data,error}=await supabase.rpc('member_directory_search',{p_query:query}); if(error)throw error; return (data||[]) as MemberDirectoryItem[];
 }
@@ -128,12 +129,119 @@ export async function downloadDriveFile(driveFileId:string){const d=await workfl
 export async function downloadTemplate(){const d=await workflow('TEMPLATE_DOWNLOAD',{});saveBase64File(d.fileName,d.mimeType,d.base64)}
 export async function uploadToStaging(file:File){const {data:{user}}=await supabase.auth.getUser();if(!user)throw new Error('UNAUTHORIZED');const safe=file.name.replace(/[^\w.\-\u0600-\u06FF]+/g,'_');const path=`${user.id}/${crypto.randomUUID()}-${safe}`;const ext=file.name.split('.').pop()?.toLowerCase();const inferred=ext==='pdf'?'application/pdf':ext==='docx'?'application/vnd.openxmlformats-officedocument.wordprocessingml.document':file.type||'application/octet-stream';const {error}=await supabase.storage.from('staging').upload(path,file,{upsert:false,contentType:inferred});if(error)throw new Error(error.message||'تعذر رفع الملف مؤقتًا.');return path}
 
-export async function operationalPositions(){const {data,error}=await supabase.rpc('operational_position_sheet');if(error)throw error;return data||[];}
-export async function positionAssignments(positionId:string){const {data,error}=await supabase.from('position_assignments').select('*,profile:profiles(id,full_name,university_id)').eq('position_id',positionId).order('active',{ascending:false}).order('starts_at',{ascending:false});if(error)throw error;return data||[];}
-export async function positionDutyTemplates(positionId:string){const {data,error}=await supabase.from('position_duty_templates').select('*').eq('position_id',positionId).order('active',{ascending:false}).order('created_at');if(error)throw error;return data||[];}
-export async function positionEventTemplates(positionId:string){const {data,error}=await supabase.from('position_event_templates').select('*').eq('position_id',positionId).order('active',{ascending:false}).order('next_event_at');if(error)throw error;return data||[];}
-export async function quickTaskSheet(){const {data,error}=await supabase.rpc('quick_task_sheet');if(error)throw error;return data||[];}
-export async function workEventSheet(){const {data,error}=await supabase.rpc('work_event_sheet');if(error)throw error;return data||[];}
-export async function eventAttendance(eventId:string){const {data,error}=await supabase.from('event_attendance').select('*,profile:profiles(id,full_name,university_id)').eq('event_id',eventId).order('status').order('created_at');if(error)throw error;return data||[];}
-export async function notificationFeed(limit=30){const {data,error}=await supabase.rpc('user_notification_feed',{p_limit:limit});if(error)throw error;return data||[];}
-export async function readinessSnapshot(){const {data,error}=await supabase.rpc('system_readiness_snapshot');if(error)throw error;return data||{};}
+
+// -----------------------------------------------------------------------------
+// KMSA compatibility readers for the comprehensive Workspace update.
+// These readers prefer the new RPC/view names when installed and degrade safely
+// to the matching table (or an empty result) instead of crashing the shell.
+// -----------------------------------------------------------------------------
+async function kmsaCompatRpc(name:string, params:Record<string,any> = {}) {
+  const { data, error } = await supabase.rpc(name, params);
+  if (!error) return data;
+  const missing = error.code === 'PGRST202' || error.code === '42883' || /Could not find the function|does not exist/i.test(error.message || '');
+  if (missing) return null;
+  throw error;
+}
+async function kmsaCompatTable(table:string, select='*') {
+  const { data, error } = await supabase.from(table).select(select);
+  if (error) return [];
+  return data || [];
+}
+
+
+// KMSA compatibility API
+export async function notificationFeed(..._args:any[]): Promise<any[]> {
+  const rpc = await kmsaCompatRpc('notification_feed');
+  if (rpc !== null) return Array.isArray(rpc) ? rpc : (rpc?.items || []);
+  return await kmsaCompatTable('user_notifications');
+}
+
+
+// KMSA compatibility API
+export async function quickTaskSheet(..._args:any[]): Promise<any[]> {
+  const rpc = await kmsaCompatRpc('quick_task_sheet');
+  if (rpc !== null) return Array.isArray(rpc) ? rpc : (rpc?.items || []);
+  const rows:any[] = await kmsaCompatTable('quick_tasks');
+  return rows;
+}
+
+
+// KMSA compatibility API
+export async function readinessSnapshot(..._args:any[]): Promise<any> {
+  const rpc = await kmsaCompatRpc('readiness_snapshot');
+  if (rpc !== null) return Array.isArray(rpc) && rpc.length === 1 ? rpc[0] : rpc;
+  // Safe fallback: derive the most important readiness signals from readers that
+  // already exist in v3. This keeps oversight usable even before the RPC is added.
+  const [projects, routines, proposals] = await Promise.all([
+    workspaceProjectSheet().catch(()=>[]),
+    routineObligationSheet().catch(()=>[]),
+    proposalTrackingSheet().catch(()=>[])
+  ]);
+  const p:any[] = projects as any[]; const r:any[] = routines as any[]; const pr:any[] = proposals as any[];
+  const snapshot:any = {
+    ready: false,
+    projects_needing_attention: p.filter(x=>x.needs_attention).length,
+    secretary_response_needed: p.filter(x=>x.secretary_response_needed).length,
+    overdue_routines: r.filter(x=>x.overdue).length,
+    overdue_proposals: pr.filter(x=>x.overdue).length,
+    critical_count: p.filter(x=>x.secretary_response_needed).length + r.filter(x=>x.overdue).length + pr.filter(x=>x.overdue).length
+  };
+  snapshot.ready = snapshot.critical_count === 0;
+  return snapshot;
+}
+
+
+// KMSA compatibility API
+export async function operationalPositions(..._args:any[]): Promise<any[]> {
+  const rpc = await kmsaCompatRpc('operational_position_sheet');
+  if (rpc !== null) return Array.isArray(rpc) ? rpc : (rpc?.items || []);
+  return await kmsaCompatTable('operational_positions');
+}
+
+
+// KMSA compatibility API
+export async function positionAssignments(...args:any[]): Promise<any[]> {
+  const rpc = await kmsaCompatRpc('position_assignment_sheet');
+  if (rpc !== null) return Array.isArray(rpc) ? rpc : (rpc?.items || []);
+  const rows:any[] = await kmsaCompatTable('position_assignments');
+  const positionId = typeof args[0] === 'string' ? args[0] : args[0]?.positionId;
+  return positionId ? rows.filter((x:any)=>x.position_id===positionId) : rows;
+}
+
+
+// KMSA compatibility API
+export async function positionDutyTemplates(...args:any[]): Promise<any[]> {
+  const rpc = await kmsaCompatRpc('position_duty_template_sheet');
+  if (rpc !== null) return Array.isArray(rpc) ? rpc : (rpc?.items || []);
+  const rows:any[] = await kmsaCompatTable('position_duty_templates');
+  const positionId = typeof args[0] === 'string' ? args[0] : args[0]?.positionId;
+  return positionId ? rows.filter((x:any)=>x.position_id===positionId) : rows;
+}
+
+
+// KMSA compatibility API
+export async function positionEventTemplates(...args:any[]): Promise<any[]> {
+  const rpc = await kmsaCompatRpc('position_event_template_sheet');
+  if (rpc !== null) return Array.isArray(rpc) ? rpc : (rpc?.items || []);
+  const rows:any[] = await kmsaCompatTable('position_event_templates');
+  const positionId = typeof args[0] === 'string' ? args[0] : args[0]?.positionId;
+  return positionId ? rows.filter((x:any)=>x.position_id===positionId) : rows;
+}
+
+
+// KMSA compatibility API
+export async function workEventSheet(..._args:any[]): Promise<any[]> {
+  const rpc = await kmsaCompatRpc('work_event_sheet');
+  if (rpc !== null) return Array.isArray(rpc) ? rpc : (rpc?.items || []);
+  return await kmsaCompatTable('work_events');
+}
+
+
+// KMSA compatibility API
+export async function eventAttendance(...args:any[]): Promise<any[]> {
+  const eventId = typeof args[0] === 'string' ? args[0] : args[0]?.eventId;
+  const rpc = eventId ? await kmsaCompatRpc('event_attendance_sheet',{p_event_id:eventId}) : null;
+  if (rpc !== null) return Array.isArray(rpc) ? rpc : (rpc?.items || []);
+  const rows:any[] = await kmsaCompatTable('event_attendance');
+  return eventId ? rows.filter((x:any)=>x.event_id===eventId) : rows;
+}
