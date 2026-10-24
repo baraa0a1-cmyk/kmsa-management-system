@@ -42,13 +42,14 @@ function MemberShell(){
   if(['SECRETARY','GS','PRESIDENT','ADMIN'].includes(profile.role)){setAssigned(true);return}
   let live=true;
   async function refresh(){
-   const [a,b,c,d]=await Promise.all([
+   const [a,b,c,d,e]=await Promise.all([
     supabase.from('initiatives').select('id',{count:'exact',head:true}).eq('owner_id',profile!.id).eq('approval_status','APPROVED'),
     supabase.from('routine_obligations').select('id',{count:'exact',head:true}).eq('owner_id',profile!.id).eq('active',true),
     supabase.from('quick_tasks').select('id',{count:'exact',head:true}).eq('assignee_id',profile!.id).not('status','in','("DONE","CANCELLED")'),
-    supabase.from('position_assignments').select('id',{count:'exact',head:true}).eq('profile_id',profile!.id).eq('active',true)
+    supabase.from('position_assignments').select('id',{count:'exact',head:true}).eq('profile_id',profile!.id).eq('active',true),
+    supabase.from('project_supervision_assignments').select('initiative_id',{count:'exact',head:true}).eq('supervisor_id',profile!.id)
    ]);
-   if(live&&![a,b,c,d].some(q=>q.error))setAssigned([a,b,c,d].some(q=>(q.count||0)>0));
+   if(live&&![a,b,c,d,e].some(q=>q.error))setAssigned([a,b,c,d,e].some(q=>(q.count||0)>0));
   }
   const onFocus=()=>{void refresh()};
   void refresh();window.addEventListener('focus',onFocus);

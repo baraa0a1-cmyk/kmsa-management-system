@@ -17,17 +17,60 @@ Deno.serve(async(req)=>{if(req.method==='OPTIONS')return new Response('ok',{head
  const jobs=[...(documentJobs||[]),...otherJobs];
  for(const job of jobs){const lockTime=new Date().toISOString();const locked=await db.from('background_jobs').update({status:'PROCESSING',locked_at:lockTime,heartbeat_at:lockTime,attempts:job.attempts+1}).eq('id',job.id).eq('status','PENDING').select('id').maybeSingle();if(!locked.data)continue;try{if(documentTypes.includes(job.job_type))await invoke('document-job',job.payload);else if(job.job_type==='TELEGRAM_NOTIFY')await invoke('telegram-notify',{event:job.payload.event,entity_type:job.entity_type,entity_id:job.entity_id,payload:job.payload});await db.from('background_jobs').update({status:'DONE',completed_at:new Date().toISOString(),heartbeat_at:new Date().toISOString()}).eq('id',job.id)}catch(e:any){const attempts=job.attempts+1;await db.from('background_jobs').update({status:attempts>=5?'FAILED':'PENDING',locked_at:null,heartbeat_at:null,last_error:e?.message||String(e),run_after:new Date(nowMs+Math.min(attempts*2,10)*60000).toISOString()}).eq('id',job.id)}}
 
+ // Requests are proportional to the milestone duration, not a daily/weekly reporting obligation.
+ // A reminder is not a finding of negligence; no supervisor approval blocks execution.
  const dueSoon=72*3600000;
- const {data:ms}=await db.from('milestones').select('*,result:results(initiative_id),owner:profiles!milestones_owner_id_fkey(id,full_name)').not('status','in','("VERIFIED","CANCELLED")');
- for(const m of ms||[]){const due=new Date(m.due_at).getTime();if(due<nowMs){await queueSystemNotice(db,'MILESTONE_OVERDUE','MILESTONE',m.id);await inboxNotify(db,m.owner_id,'MILESTONE_OVERDUE',`محطة متأخرة: ${m.title}`,'حدّث الحالة أو ارفع العائق الآن.','MILESTONE',m.id,`/workspace/milestones/${m.id}`);if(['NOT_STARTED','IN_PROGRESS'].includes(m.status))await db.from('milestones').update({status:'AT_RISK'}).eq('id',m.id)}else if(due-nowMs<=dueSoon){await queueSystemNotice(db,'MILESTONE_DUE_SOON','MILESTONE',m.id);await inboxNotify(db,m.owner_id,'MILESTONE_DUE_SOON',`موعد قريب: ${m.title}`,'راجع ما تبقى قبل الموعد.','MILESTONE',m.id,`/workspace/milestones/${m.id}`)}}
-
+ const {data:ms}=await db.from('milestones').select('*,result:results(initiative_id,initiative:initiatives(id,title,owner_id,secretary_id,setup_status,approval_status,status,assignment_start_at))').not('status','in','("VERIFIED","CANCELLED","READY_FOR_VERIFICATION")');
+ for(const m of ms||[]){
+  const project=m.result?.initiative;if(!project||project.setup_status!=='ACTIVE'||project.approval_status!=='APPROVED'||['COMPLETED','CANCELLED'].includes(project.status))continue;
+  // Relative milestones start after their predecessor finishes; its earlier planned date is only a forecast.
+  if(m.deadline_mode==='RELATIVE'&&m.relative_to_milestone_id){const previous=(await db.from('milestones').select('completed_reported_at').eq('id',m.relative_to_milestone_id).maybeSingle()).data;if(!previous?.completed_reported_at)continue;}
+  const due=new Date(m.due_at).getTime();let created=Math.max(new Date(m.created_at).getTime(),project.assignment_start_at?new Date(project.assignment_start_at).getTime():0);
+  if(m.deadline_mode==='RELATIVE'&&m.relative_to_milestone_id){const preceding=(await db.from('milestones').select('completed_reported_at').eq('id',m.relative_to_milestone_id).maybeSingle()).data;created=Math.max(created,new Date(preceding.completed_reported_at).getTime());}const span=Math.max(3600000,due-created);const elapsed=nowMs-created;
+  if(!Number.isFinite(due)||nowMs<created)continue;
+  const {data:progress}=await db.from('project_activity_entries').select('created_at,details').eq('milestone_id',m.id).eq('kind','MILESTONE_UPDATE').order('created_at',{ascending:false}).limit(30);
+  const lastProgress=(progress||[]).find((e:any)=>['PROGRESS','COMPLETE'].includes(String(e.details?.update_type||'PROGRESS')));
+  const lastProgressMs=lastProgress?new Date(lastProgress.created_at).getTime():created;
+  const remaining=due-nowMs;const proportion=span<=3*86400000?86400000:span<=14*86400000?span*.25:span*.5;
+  const firstCheck=span<=3*86400000?due-86400000:span<=14*86400000?due-span*.25:created+span*.5;
+  const late=remaining<0;
+  const needsInfo=late||(nowMs>=firstCheck&&lastProgressMs<firstCheck);
+  if(needsInfo){
+   const {data:recentReminder}=await db.from('notification_log').select('id').eq('event_type','MILESTONE_CONFIRM_STATUS').eq('entity_type','MILESTONE').eq('entity_id',m.id).gte('created_at',new Date(nowMs-24*3600000).toISOString()).limit(1);
+   if(!(recentReminder||[]).length){
+    await inboxNotify(db,m.owner_id,'MILESTONE_CONFIRM_STATUS',`يرجى تأكيد الوضع: ${m.title}`,late?'تجاوز موعد المحطة. سجّل ما حدث أو عدم حدوث تقدم.':'اقتربت نقطة المتابعة ولم يظهر تقدم جديد. يكفي تحديث خلية آخر ما حدث.','MILESTONE',m.id,`/workspace/projects/${project.id}`);
+    await db.from('notification_log').insert({channel:'SYSTEM',recipient:m.owner_id,event_type:'MILESTONE_CONFIRM_STATUS',entity_type:'MILESTONE',entity_id:m.id,status:'SENT'});
+   }
+   // An unanswered reminder becomes a supervision issue after 48h, not an automatic accusation.
+   const {data:oldReminders}=await db.from('notification_log').select('created_at').eq('event_type','MILESTONE_CONFIRM_STATUS').eq('entity_type','MILESTONE').eq('entity_id',m.id).lt('created_at',new Date(nowMs-48*3600000).toISOString()).order('created_at',{ascending:false}).limit(1);
+   if((oldReminders||[]).length&&lastProgressMs<new Date(oldReminders![0].created_at).getTime()){
+    const assigned=(await db.from('project_supervision_assignments').select('supervisor_id').eq('initiative_id',project.id).maybeSingle()).data?.supervisor_id||project.secretary_id;
+    if(assigned)await inboxNotify(db,assigned,'MILESTONE_AWAITING_CLARIFICATION',`محطة تحتاج استيضاحًا: ${m.title}`,'طلب النظام تأكيد الوضع ولم يظهر تقدم موثق بعد؛ راجع المسؤول عند الحاجة.','MILESTONE',m.id,`/workspace/projects/${project.id}`);
+   }
+  }
+  // Supervision runs alongside delivery. Normal progress does not require permission to continue.
+  const reviewPoints=span>14*86400000?[created+span*.5,due-span*.15]:[firstCheck];
+  for(let k=0;k<reviewPoints.length;k++){
+   const checkpoint=reviewPoints[k];if(nowMs<checkpoint)continue;
+   const {data:review}=await db.from('milestone_supervision_events').select('id').eq('milestone_id',m.id).in('event_type',['PROGRESS_REVIEW','COMPLETION_READ']).gte('created_at',new Date(checkpoint).toISOString()).limit(1);
+   if((review||[]).length)continue;
+   const tag=`MILESTONE_SUPERVISOR_REVIEW_${k+1}`;
+   const {data:sent}=await db.from('notification_log').select('created_at').eq('event_type',tag).eq('entity_type','MILESTONE').eq('entity_id',m.id).limit(1);
+   const assigned=(await db.from('project_supervision_assignments').select('supervisor_id').eq('initiative_id',project.id).maybeSingle()).data?.supervisor_id||project.secretary_id;
+   if(!assigned)continue;
+   if(!(sent||[]).length){
+    await inboxNotify(db,assigned,tag,`مراجعة سير محطة: ${m.title}`,'تأكد من وضع العمل أو اطلب تحديثًا من المسؤول؛ لا توجد موافقة تعطل التنفيذ.','MILESTONE',m.id,`/workspace/projects/${project.id}`);
+    await db.from('notification_log').insert({channel:'SYSTEM',recipient:assigned,event_type:tag,entity_type:'MILESTONE',entity_id:m.id,status:'SENT'});
+   }else if(nowMs-new Date(sent![0].created_at).getTime()>48*3600000&&assigned!==project.secretary_id&&project.secretary_id){
+    await inboxNotify(db,project.secretary_id,`DELEGATE_REVIEW_OVERDUE_${k+1}`,`مراجعة مفوضة لم تُوثق: ${m.title}`,'راجع مع المتابع المباشر حالة المحطة دون التدخل في التنفيذ.','MILESTONE',m.id,`/workspace/projects/${project.id}`);
+   }
+  }
+  if(late)await queueSystemNotice(db,'MILESTONE_OVERDUE','MILESTONE',m.id);
+ }
  const {data:projects}=await db.from('initiatives').select('*').eq('setup_status','ACTIVE').not('status','in','("COMPLETED","CANCELLED")');
- for(const p of projects||[]){
-  const [{data:latestUpdate},{count:pendingPermissions},{data:projectResults}]=await Promise.all([db.from('project_updates').select('health,assistance_needed,next_check_at,created_at').eq('initiative_id',p.id).order('created_at',{ascending:false}).limit(1).maybeSingle(),db.from('project_permissions').select('*',{count:'exact',head:true}).eq('initiative_id',p.id).eq('status','PENDING'),db.from('results').select('id').eq('initiative_id',p.id)]);
-  const resultIds=(projectResults||[]).map((x:any)=>x.id);let openBlockers=0;if(resultIds.length){const {data:projectMilestones}=await db.from('milestones').select('id').in('result_id',resultIds);const milestoneIds=(projectMilestones||[]).map((x:any)=>x.id);if(milestoneIds.length){const {count}=await db.from('blockers').select('*',{count:'exact',head:true}).in('milestone_id',milestoneIds).eq('status','OPEN');openBlockers=count||0}}
-  const updateDue=p.next_update_due_at?new Date(p.next_update_due_at).getTime():null;const stale=!!(updateDue&&updateDue<nowMs);if(updateDue){const updateEvent=stale?'PROJECT_UPDATE_OVERDUE':(updateDue-nowMs<=12*3600000?'PROJECT_UPDATE_DUE_SOON':'');if(updateEvent){await queueSystemNotice(db,updateEvent,'INITIATIVE',p.id);await inboxNotify(db,p.owner_id,updateEvent,stale?`تحديث المشروع متأخر: ${p.title}`:`حان تحديث المشروع: ${p.title}`,stale?'ارفع تقرير التقدم الآن؛ لا تنتظر اقتراب الموعد النهائي.':'اكتب ماذا أنجزت، ما التالي، وهل تحتاج دعمًا.','INITIATIVE',p.id,`/workspace/projects/${p.id}`)}}
-  const due=p.target_due_at?new Date(p.target_due_at).getTime():null;const approaching=!!(due&&due>nowMs&&due-nowMs<=5*86400000);const nextCheckMissed=!!(latestUpdate?.next_check_at&&new Date(latestUpdate.next_check_at).getTime()<nowMs);const assistanceNeeded=!!(latestUpdate?.assistance_needed&&String(latestUpdate.assistance_needed).trim());const blocked=(openBlockers||0)>0;const permissionPending=(pendingPermissions||0)>0;const risky=['WATCH','AT_RISK','BLOCKED'].includes(p.health)||stale||approaching||nextCheckMissed||assistanceNeeded||blocked||permissionPending;
-  if(risky){await queueSystemNotice(db,'PROJECT_EARLY_WARNING','INITIATIVE',p.id,'SECRETARY');if(p.secretary_id)await inboxNotify(db,p.secretary_id,'PROJECT_EARLY_WARNING',`مشروع يحتاج متابعة: ${p.title}`,[stale?'تحديث المسؤول متأخر':null,blocked?'يوجد عائق مفتوح':null,assistanceNeeded?'المسؤول طلب دعمًا':null,approaching?'الموعد النهائي قريب':null].filter(Boolean).join(' · '),'INITIATIVE',p.id,`/workspace/projects/${p.id}`)}
+ for(const project of projects||[]){
+  const due=project.target_due_at?new Date(project.target_due_at).getTime():null;
+  if(due&&due<nowMs)await queueSystemNotice(db,'PROJECT_EARLY_WARNING','INITIATIVE',project.id,'SECRETARY');
  }
 
  const {data:routines}=await db.from('routine_obligations').select('*').eq('active',true);

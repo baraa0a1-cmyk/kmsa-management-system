@@ -10,7 +10,7 @@ export const executionStatusLabel: Record<ExecutionStatus,string> = {
   NOT_STARTED:'لم يبدأ', IN_PROGRESS:'جارٍ التنفيذ', AT_RISK:'مهدد', BLOCKED:'متعثر', COMPLETED:'مكتمل', CANCELLED:'ملغى'
 };
 export const milestoneStatusLabel: Record<MilestoneStatus,string> = {
-  NOT_STARTED:'لم يبدأ', IN_PROGRESS:'جارٍ التنفيذ', AT_RISK:'مهدد', BLOCKED:'متعثر', READY_FOR_VERIFICATION:'جاهز للتحقق', VERIFIED:'متحقق', CANCELLED:'ملغى'
+  NOT_STARTED:'لم يبدأ', IN_PROGRESS:'جارٍ التنفيذ', AT_RISK:'مهدد', BLOCKED:'متعثر', READY_FOR_VERIFICATION:'مكتمل وفق إفادة المسؤول', VERIFIED:'متحقق', CANCELLED:'ملغى'
 };
 
 export function formatDate(v?: string | null) {
