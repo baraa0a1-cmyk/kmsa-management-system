@@ -1,4 +1,4 @@
-import { audit, canManageSecretariat, corsHeaders, hoursFromNow, isGs, json, queueJob, requestUser, setting } from '../_shared/common.ts';
+import { anonClient, audit, canManageSecretariat, corsHeaders, hoursFromNow, isGs, json, queueJob, requestUser, setting } from '../_shared/common.ts';
 
 const editableProposalStatuses=['DRAFT','WITH_SECRETARY','REVISION_REQUESTED','REVISED','DEFERRED'];
 const terminalProposalStatuses=['NOT_APPROVED','WITHDRAWN'];
@@ -139,6 +139,20 @@ Deno.serve(async(req)=>{
   }
   if(actionName==='DECISION_TO_MILESTONE'){
    const d=(await db.from('decisions').select('*').eq('id',payload.decisionId).single()).data;if(!d)throw new Error('القرار غير موجود.');if(!(profile.role==='ADMIN'||profile.role==='GS'||canManageSecretariat(profile,d.secretariat_id)))throw new Error('غير مسموح.');if(!d.owner_id||!d.due_at)throw new Error('يجب تحديد مسؤول وموعد للقرار قبل تحويله للمتابعة.');const cycle=(await db.from('cycles').select('id').eq('is_current',true).single()).data;let init=(await db.from('initiatives').select('*').eq('secretariat_id',d.secretariat_id).eq('source_type','DECISION').eq('status','ACTIVE').limit(1).maybeSingle()).data;if(!init){const x=await db.from('initiatives').insert({cycle_id:cycle.id,secretariat_id:d.secretariat_id,owner_id:d.owner_id,title:'قرارات تحتاج متابعة',objective:'تحويل القرارات إلى التزامات قابلة للتحقق',source_type:'DECISION',status:'ACTIVE'}).select().single();if(x.error)throw x.error;init=x.data}const rr=await db.from('results').insert({initiative_id:init.id,statement:d.decision_text,success_measure:'تنفيذ القرار كما هو مع دليل قابل للتحقق',owner_id:d.owner_id,due_at:d.due_at}).select().single();if(rr.error)throw rr.error;const mm=await db.from('milestones').insert({result_id:rr.data.id,secretariat_id:d.secretariat_id,owner_id:d.owner_id,title:d.title,due_at:d.due_at,verification_criteria:'دليل يثبت تنفيذ القرار',created_by:profile.id}).select().single();if(mm.error)throw mm.error;await db.from('decisions').update({status:'IN_TRACKING',related_entity_type:'MILESTONE',related_entity_id:mm.data.id}).eq('id',d.id);await audit(db,profile,'DECISION_TO_MILESTONE','DECISION',d.id,d,{milestone_id:mm.data.id});return json({ok:true,milestone:mm.data});
+  }
+
+  if(actionName==='ACCOUNT_EMAIL_CHANGE'){
+   const email=String(payload.email||'').trim().toLowerCase();const currentPassword=String(payload.currentPassword||'');
+   if(!email||!currentPassword)throw new Error('أدخل البريد الجديد وكلمة السر الحالية.');
+   const verify=anonClient();const {error:verifyError}=await verify.auth.signInWithPassword({email:profile.email,password:currentPassword});if(verifyError)throw new Error('كلمة السر الحالية غير صحيحة.');
+   const existing=(await db.from('profiles').select('id').eq('email',email).neq('id',profile.id).maybeSingle()).data;if(existing)throw new Error('هذا البريد مستخدم في حساب آخر.');
+   const before={...profile};const {error:authError}=await db.auth.admin.updateUserById(profile.auth_user_id,{email,email_confirm:true});if(authError)throw authError;
+   const upd=await db.from('profiles').update({email}).eq('id',profile.id).select().single();if(upd.error)throw upd.error;await audit(db,profile,'ACCOUNT_EMAIL_CHANGE','PROFILE',profile.id,before,upd.data);return json({ok:true});
+  }
+  if(actionName==='ACCOUNT_PASSWORD_CHANGE'){
+   const currentPassword=String(payload.currentPassword||'');const newPassword=String(payload.newPassword||'');if(!currentPassword||newPassword.length<8)throw new Error('أدخل كلمة السر الحالية وكلمة جديدة من 8 أحرف على الأقل.');
+   const verify=anonClient();const {error:verifyError}=await verify.auth.signInWithPassword({email:profile.email,password:currentPassword});if(verifyError)throw new Error('كلمة السر الحالية غير صحيحة.');
+   const {error:authError}=await db.auth.admin.updateUserById(profile.auth_user_id,{password:newPassword});if(authError)throw authError;await db.from('profiles').update({must_change_password:false}).eq('id',profile.id);await audit(db,profile,'ACCOUNT_PASSWORD_CHANGE','PROFILE',profile.id,null,{changed:true});return json({ok:true});
   }
 
   if(actionName==='PASSWORD_CHANGED'){await db.from('profiles').update({must_change_password:false}).eq('id',profile.id);await audit(db,profile,'PASSWORD_CHANGED','PROFILE',profile.id,null,{must_change_password:false});return json({ok:true});}

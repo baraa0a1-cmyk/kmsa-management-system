@@ -1,11 +1,11 @@
 {
-  "name": "KMSA Management System",
+  "name": "رابطة طلاب كلية الطب — جامعة الخرطوم",
   "short_name": "KMSA",
-  "start_url": "./#/?source=pwa",
+  "start_url": "./#/",
   "display": "standalone",
-  "background_color": "#f5f7f4",
-  "theme_color": "#0d2b24",
+  "background_color": "#f7f8fa",
+  "theme_color": "#191714",
   "lang": "ar",
   "dir": "rtl",
-  "description": "منصة إدارة عمل رابطة طلاب كلية الطب"
+  "description": "البوابة الإلكترونية لأعضاء رابطة طلاب كلية الطب — جامعة الخرطوم"
 }
