@@ -9,8 +9,8 @@ const api=read('apps/web/src/lib/api.ts'),sql=read('KMSA_V5_2_UPGRADE.sql'),shel
 const proposal=read('apps/web/src/pages/ProposalEditorPage.tsx');
 const worker=read('supabase/functions/document-job/index.ts');
 const checks=[
- ['Follow-up sheet retains inline milestone status change',ui.includes('followup-table')&&ui.includes('followup-status-select')],
- ['Typed updates in dialog, result column appears after completed',ui.includes('نوع آخر ما حدث')&&ui.includes('v53-sheet')&&ui.includes('النتيجة')&&ui.includes('NO_PROGRESS')],
+ ['Follow-up sheet retains inline milestone status change',ui.includes('followup-table')&&ui.includes('v54-state-select')],
+ ['Typed updates in dialog, result column appears after completed',ui.includes('نوع آخر ما حدث')&&ui.includes('v54-sheet')&&ui.includes('النتيجة')&&ui.includes('NO_PROGRESS')],
  ['Activity records actor timestamp and classification',wf.includes('author_id:profile.id')&&wf.includes('update_type:updateType')],
  ['No progress update cannot imply real progress in monitoring',mon.includes("['PROGRESS','COMPLETE']")],
  ['Result quality review is not an execution gate',wf.includes('MILESTONE_QUALITY_REVIEW')&&wf.includes('RESULT_OK')&&ui.includes('النتيجة مناسبة')],

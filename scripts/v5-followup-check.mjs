@@ -9,7 +9,7 @@ const api=read('apps/web/src/lib/api.ts');
 const shell=read('apps/web/src/components/AppShell.tsx');
 const sql=read('KMSA_FOLLOWUP_V5_1_UPGRADE.sql');const documentJob=read('supabase/functions/document-job/index.ts');
 const checks = [
- ['Milestone inline select opens a clean update dialog', /v53-sheet/.test(ui)&&/onChange=\{e=>openUpdate\(/.test(ui)&&/saveMilestone\(/.test(ui)],
+ ['Milestone inline select opens a clean update dialog', /v54-sheet/.test(ui)&&/onChange=\{e=>openUpdate\(/.test(ui)&&/saveMilestone\(/.test(ui)],
  ['Milestone update has in-row category and does not require periodic reports',/updateTypes/.test(ui)&&/MILESTONE_PROGRESS_UPDATE/.test(ui)&&!/إفادة المسؤول الدورية/.test(ui)],
  ['Leader can add reference without being marked blocked',/PROJECT_REFERENCE_ADD/.test(ui)&&/project_activity_entries/.test(wf)],
  ['Secretary note is independent of health',/PROJECT_SECRETARY_NOTE_ADD/.test(wf)&&/const kind=isNote\?'SECRETARY_NOTE'/.test(wf)],

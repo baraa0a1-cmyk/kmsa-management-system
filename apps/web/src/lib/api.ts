@@ -162,10 +162,20 @@ async function kmsaCompatTable(table:string, select='*') {
 
 
 // KMSA compatibility API
-export async function notificationFeed(..._args:any[]): Promise<any[]> {
-  const rpc = await kmsaCompatRpc('notification_feed');
-  if (rpc !== null) return Array.isArray(rpc) ? rpc : (rpc?.items || []);
-  return await kmsaCompatTable('user_notifications');
+export async function notificationFeed(limit=30): Promise<any[]> {
+  // v5.4: The installed SQL exposes user_notification_feed, not notification_feed.
+  const count=Math.max(1,Math.min(100,limit));
+  const {data,error}=await supabase.rpc('user_notification_feed',{p_limit:count});
+  if(!error)return (Array.isArray(data)?data:data?.items||[]) as any[];
+  const missing=error.code==='PGRST202'||error.code==='42883'||/not found|does not exist/i.test(error.message||'');
+  if(!missing)throw error; // Never disguise RLS/network failures as an empty inbox.
+  const {data:auth,error:authError}=await supabase.auth.getUser();if(authError)throw authError;
+  if(!auth.user)throw new Error('يجب تسجيل الدخول لعرض الإشعارات.');
+  const {data:person,error:profileError}=await supabase.from('profiles').select('id').eq('auth_user_id',auth.user.id).single();
+  if(profileError)throw profileError;
+  const backup=await supabase.from('user_notifications').select('*').eq('profile_id',person.id).order('created_at',{ascending:false}).limit(count);
+  if(backup.error)throw backup.error;
+  return backup.data||[];
 }
 
 

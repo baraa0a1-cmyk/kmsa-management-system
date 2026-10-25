@@ -343,8 +343,8 @@ Deno.serve(async(req)=>{
    }
    const note=String(payload.note||'').trim();
    const q=await db.from('milestone_supervision_events').insert({initiative_id:init.id,milestone_id:m.id,actor_id:profile.id,event_type:kind,note:note||null}).select().single();if(q.error)throw q.error;
-   if(kind==='UPDATE_REQUEST')await inboxNotify(db,m.owner_id,'MILESTONE_UPDATE_REQUEST',`المتابع يطلب تحديث محطة: ${m.title}`,note||'حدّث آخر ما حدث في جدول المشروع.','MILESTONE',m.id,`/workspace/projects/${init.id}`);
-   await audit(db,profile,actionName,'MILESTONE',m.id,null,q.data);return json({ok:true,event:q.data});
+   const notificationSent=kind==='UPDATE_REQUEST'?await inboxNotify(db,m.owner_id,'MILESTONE_UPDATE_REQUEST',`المتابع يطلب تحديث محطة: ${m.title}`,note||'حدّث آخر ما حدث في جدول المشروع.','MILESTONE',m.id,`/workspace/projects/${init.id}`):true;
+   await audit(db,profile,actionName,'MILESTONE',m.id,null,q.data);return json({ok:true,event:q.data,notificationSent,warning:!notificationSent?'تم تسجيل الطلب، لكن تعذر إرسال إشعار للمسؤول. تواصل معه مباشرة وتحقق من إعدادات الإشعارات.':null});
   }
 
   if(actionName==='MILESTONE_QUALITY_REVIEW'){
@@ -376,10 +376,10 @@ Deno.serve(async(req)=>{
      const rr=await db.from('results').update({assignment_status:'ACTIVE',completed_at:null}).eq('id',m.result_id);if(rr.error)throw rr.error;
     }
    }
-   if(['PROGRESS_FOLLOW_UP','RESULT_REVISION'].includes(reviewKind))
-    await inboxNotify(db,m.owner_id,'MILESTONE_QUALITY_FEEDBACK',`ملاحظة المشرف على: ${m.title}`,note,'MILESTONE',m.id,`/workspace/projects/${init.id}`);
+   const reviewLabel=({PROGRESS_OK:'التقدم مناسب',PROGRESS_FOLLOW_UP:'التقدم يحتاج متابعة',RESULT_OK:'النتيجة مناسبة',RESULT_REVISION:'النتيجة تحتاج تعديلًا'} as Record<string,string>)[reviewKind];
+   const notificationSent=await inboxNotify(db,m.owner_id,`MILESTONE_REVIEW_${reviewKind}`,`تقييم المشرف: ${m.title}`,note||reviewLabel,'MILESTONE',m.id,`/workspace/projects/${init.id}`);
    await audit(db,profile,'MILESTONE_QUALITY_REVIEW','MILESTONE',m.id,null,q.data,{source_activity_id:sourceId});
-   return json({ok:true,review:q.data});
+   return json({ok:true,review:q.data,notificationSent,warning:!notificationSent?'حُفظ التقييم، لكن تعذر إرسال الإشعار للمسؤول.':null});
   }
 
   if(actionName==='MILESTONE_DEADLINE_REQUEST'){
@@ -409,10 +409,10 @@ Deno.serve(async(req)=>{
   }
 
   if(actionName==='MILESTONE_PROGRESS_UPDATE'){
-   const m=await getMilestone(db,payload.milestoneId);const result=await getResult(db,m.result_id);const init=result.initiative;if(!isProjectLead(profile,init,result)||m.owner_id!==profile.id)throw new Error('مسؤول المشروع فقط يحدث حالة محطة الإنجاز.');if(init.approval_status!=='APPROVED'||init.setup_status!=='ACTIVE'||['COMPLETED','CANCELLED'].includes(init.status))throw new Error('المشروع ليس قيد التنفيذ.');if(['VERIFIED','CANCELLED'].includes(m.status))throw new Error('المحطة مغلقة ولا يمكن تغييرها دون إجراء رسمي.');const allowed=['NOT_STARTED','IN_PROGRESS','AT_RISK','BLOCKED','READY_FOR_VERIFICATION'];const status=allowed.includes(payload.status)?payload.status:m.status;const updateType=String(payload.updateType||'PROGRESS');
-   if(!['PROGRESS','COMPLETE','NO_PROGRESS','BLOCKER','PLAN_CHANGE'].includes(updateType))throw new Error('نوع التحديث غير صحيح.');
+   const m=await getMilestone(db,payload.milestoneId);const result=await getResult(db,m.result_id);const init=result.initiative;if(!isProjectLead(profile,init,result)||m.owner_id!==profile.id)throw new Error('مسؤول المشروع فقط يحدث حالة محطة الإنجاز.');if(init.approval_status!=='APPROVED'||init.setup_status!=='ACTIVE'||['COMPLETED','CANCELLED'].includes(init.status))throw new Error('المشروع ليس قيد التنفيذ.');if(['VERIFIED','CANCELLED'].includes(m.status))throw new Error('المحطة مغلقة ولا يمكن تغييرها دون إجراء رسمي.');const allowed=['IN_PROGRESS','BLOCKED','READY_FOR_VERIFICATION'];const status=allowed.includes(payload.status)?payload.status:m.status;const updateType=String(payload.updateType||'PROGRESS');
+   if(!['PROGRESS','NO_PROGRESS','BLOCKER'].includes(updateType))throw new Error('أنواع التحديث: تقدم جديد، لا يوجد تقدم، عائق / تأخر. تغيير الموعد له طلب مستقل.');
    const nextLeadNote=payload.leadNote??m.lead_note;const nextOutcome=payload.outcomeText??m.outcome_text;const overdue=!!m.due_at&&new Date(m.due_at).getTime()<Date.now()&&!['VERIFIED','CANCELLED'].includes(status);if((overdue||['AT_RISK','BLOCKED'].includes(status))&&!String(nextLeadNote||'').trim())throw new Error('اكتب ملاحظة المسؤول لتوضيح سبب التعثر أو التأخير وما الذي سيحدث بعده.');if(status==='READY_FOR_VERIFICATION'&&!String(nextOutcome||'').trim())throw new Error('اكتب المخرج الفعلي الذي تحقق قبل إرساله للتحقق.');if(updateType==='COMPLETE'&&status!=='READY_FOR_VERIFICATION')throw new Error('إنجاز مكتمل يستلزم وضع المحطة مكتملة.');
-   if(updateType==='BLOCKER'&&!['AT_RISK','BLOCKED'].includes(status))throw new Error('حدد حالة مهددة أو متعثرة عند إضافة عائق.');
+   if(updateType==='BLOCKER'&&status!=='BLOCKED')throw new Error('حدد حالة مهددة أو متعثرة عند إضافة عائق.');
    if(status===m.status&&updateType!=='NO_PROGRESS'&&String(nextLeadNote||'')===String(m.lead_note||'')&&String(nextOutcome||'')===String(m.outcome_text||''))throw new Error('لم يطرأ تغيير على حالة المحطة أو تفاصيل التنفيذ.');
    const nowIso=new Date().toISOString();const patch:any={status,outcome_text:nextOutcome,lead_note:nextLeadNote,status_updated_at:nowIso};
    if(status==='READY_FOR_VERIFICATION'&&m.status!=='READY_FOR_VERIFICATION')patch.completed_reported_at=nowIso;const u=await db.from('milestones').update(patch).eq('id',m.id).select().single();if(u.error)throw u.error;const hh=await computedProjectHealth(db,init.id);const hres=await db.from('initiatives').update({health:hh}).eq('id',init.id);if(hres.error)throw hres.error;if(patch.completed_reported_at){await recalcDependentMilestones(db,m.id);await syncProjectCompletion(db,m.result_id);}await audit(db,profile,'MILESTONE_PROGRESS_UPDATE','MILESTONE',m.id,m,u.data);
@@ -622,10 +622,10 @@ Deno.serve(async(req)=>{
   }
 
   if(actionName==='NOTIFICATION_MARK_READ'){
-   await db.from('user_notifications').update({read_at:new Date().toISOString()}).eq('id',payload.notificationId).eq('profile_id',profile.id);return json({ok:true});
+   const q=await db.from('user_notifications').update({read_at:new Date().toISOString()}).eq('id',payload.notificationId).eq('profile_id',profile.id);if(q.error)throw q.error;return json({ok:true});
   }
   if(actionName==='NOTIFICATION_MARK_ALL_READ'){
-   await db.from('user_notifications').update({read_at:new Date().toISOString()}).eq('profile_id',profile.id).is('read_at',null);return json({ok:true});
+   const q=await db.from('user_notifications').update({read_at:new Date().toISOString()}).eq('profile_id',profile.id).is('read_at',null);if(q.error)throw q.error;return json({ok:true});
   }
 
   if(actionName==='ACCOUNT_EMAIL_CHANGE'){
