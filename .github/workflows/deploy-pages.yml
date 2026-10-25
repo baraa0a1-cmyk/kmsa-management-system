@@ -35,6 +35,8 @@ jobs:
         run: node ../../scripts/v5-followup-check.mjs
       - name: Verify v5.2 delegated supervision and deadlines
         run: node ../../scripts/v5-2-check.mjs
+      - name: Verify v5.3 quality review and full project history
+        run: node ../../scripts/v5-3-check.mjs
       - name: Build
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}

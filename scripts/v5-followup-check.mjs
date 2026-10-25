@@ -9,13 +9,13 @@ const api=read('apps/web/src/lib/api.ts');
 const shell=read('apps/web/src/components/AppShell.tsx');
 const sql=read('KMSA_FOLLOWUP_V5_1_UPGRADE.sql');const documentJob=read('supabase/functions/document-job/index.ts');
 const checks = [
- ['Milestone quick-edit and expandable rows', /followup-table/.test(ui)&&/setExpanded/.test(ui)&&/saveMilestone\(/.test(ui)],
+ ['Milestone inline select opens a clean update dialog', /v53-sheet/.test(ui)&&/onChange=\{e=>openUpdate\(/.test(ui)&&/saveMilestone\(/.test(ui)],
  ['Milestone update has in-row category and does not require periodic reports',/updateTypes/.test(ui)&&/MILESTONE_PROGRESS_UPDATE/.test(ui)&&!/إفادة المسؤول الدورية/.test(ui)],
  ['Leader can add reference without being marked blocked',/PROJECT_REFERENCE_ADD/.test(ui)&&/project_activity_entries/.test(wf)],
  ['Secretary note is independent of health',/PROJECT_SECRETARY_NOTE_ADD/.test(wf)&&/const kind=isNote\?'SECRETARY_NOTE'/.test(wf)],
  ['Secretary action has approval phase guard',/PROJECT_INTERVENTION_ADD[\s\S]*?approval_status!=='APPROVED'/.test(wf)],
  ['Verified milestone protected from silent rollback',/مغلقة ولا يمكن تغييرها/.test(wf)],
- ['Self-verification is rejected',/m.owner_id===profile.id/.test(wf)&&/التحقق من إنجازه بنفسه/.test(wf)],
+ ['Deputy self-review blocked; secretary exception explicit',/function reviewIdentityAllowed/.test(wf)&&/profile.id===init.secretary_id/.test(wf)&&/profile.role==='SECRETARY'/.test(wf)],
  ['Health derived from actual milestone and blocker facts',/async function computedProjectHealth/.test(wf)&&/const health=await computedProjectHealth/.test(wf)],
  ['Pulse does not require nextStep or assistance',!(/if\(!String\(payload.nextStep/.test(wf))],
  ['Immutable project activity rows protected by RLS',/create policy project_activity_entries_read/.test(sql)&&!/grant (insert|update|delete)/i.test(sql)],
@@ -28,7 +28,7 @@ const checks = [
  ['PDF staging upload is available inside milestone row',/uploadToStaging/.test(ui)&&/EVIDENCE_FILE_ADD/.test(ui)],
  ['Staging evidence worker route is reachable',/COMMITMENT_UPSERT','EVIDENCE_ADD','EVIDENCE_FILE_ADD'/.test(wf)],
  ['Ordinary file upload does not claim completion',/submitForVerification:false/.test(ui)&&/submit_for_verification/.test(documentJob)],
- ['Evidence upload remains reachable from the milestone row',/sendFile\(m\)/.test(ui)],
+ ['Evidence upload remains reachable from update dialog',/sendFile\(selected\)/.test(ui)&&/fileDraft\[selected.id\]/.test(ui)],
  ['Required database migration included',/create table if not exists public.project_activity_entries/.test(sql)],
 ];
 let fails=0;
