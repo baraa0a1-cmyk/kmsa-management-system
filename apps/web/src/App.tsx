@@ -19,6 +19,7 @@ import UsersPage from './pages/UsersPage';
 import PasswordChangePage from './pages/PasswordChangePage';
 import WorkspaceHomePage from './pages/WorkspaceHomePage';
 import WorkspaceProjectsPage from './pages/WorkspaceProjectsPage';
+import WorkspaceSupervisionPage from './pages/WorkspaceSupervisionPage';
 import WorkspaceProjectCreatePage from './pages/WorkspaceProjectCreatePage';
 import WorkspaceProjectPage from './pages/WorkspaceProjectPage';
 import WorkspaceApprovalsPage from './pages/WorkspaceApprovalsPage';
@@ -50,6 +51,7 @@ export default function App(){return <AuthProvider><Routes>
   <Route path="/proposals/:id/edit" element={<ProposalEditorPage/>}/>
 
   <Route path="/workspace" element={<WorkspaceOnly><WorkspaceHomePage/></WorkspaceOnly>}/>
+  <Route path="/workspace/supervision" element={<SecretaryOrAbove><WorkspaceSupervisionPage/></SecretaryOrAbove>}/>
   <Route path="/workspace/projects" element={<WorkspaceOnly><WorkspaceProjectsPage/></WorkspaceOnly>}/>
   <Route path="/workspace/projects/new" element={<SecretaryOrAdmin><WorkspaceProjectCreatePage/></SecretaryOrAdmin>}/><Route path="/workspace/projects/:id/edit" element={<SecretaryOrAdmin><WorkspaceProjectCreatePage/></SecretaryOrAdmin>}/>
   <Route path="/workspace/projects/:id" element={<WorkspaceOnly><WorkspaceProjectPage/></WorkspaceOnly>}/>

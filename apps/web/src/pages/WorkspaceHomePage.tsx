@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, ArrowLeft, CheckCircle2, FileText, ListTodo, Plus, RefreshCw, Target } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { proposalTrackingSheet, quickTaskSheet, routineObligationSheet, workspaceProjectSheet } from '../lib/api';
+import { proposalTrackingSheet, quickTaskSheet, routineObligationSheet, workspaceProjectSheet, workspaceReviewerQueue } from '../lib/api';
 import { useAuth } from '../hooks/useAuth';
 import type { ProjectSheetRow, ProposalSheetRow, QuickTaskRow, RoutineObligationRow } from '../lib/types';
 import { formatDate, profileTitle } from '../lib/labels';
@@ -17,6 +17,7 @@ export default function WorkspaceHomePage(){
  const [proposals,setProposals]=useState<ProposalSheetRow[]>([]);
  const [loading,setLoading]=useState(true);
  const [errors,setErrors]=useState<string[]>([]);
+ const [reviewQueue,setReviewQueue]=useState<FocusItem[]>([]);
  const load=useCallback(async()=>{
   setLoading(true);
   const labels=['المشاريع','المهام','العمل الدوري','المقترحات'];
@@ -27,8 +28,13 @@ export default function WorkspaceHomePage(){
   if(result[1].status==='fulfilled')setTasks(result[1].value as QuickTaskRow[]);
   if(result[2].status==='fulfilled')setRoutines(result[2].value);
   if(result[3].status==='fulfilled')setProposals(result[3].value);
+  if(profile&&result[0].status==='fulfilled'&&['SECRETARY','GS','ADMIN','MEMBER','APPLICANT'].includes(profile.role)){
+   try{const waiting=await workspaceReviewerQueue(profile,result[0].value);
+    setReviewQueue(waiting.map(v=>({key:`review-${v.milestoneId}`,kind:'project' as const,title:v.title,route:`/workspace/projects/${v.projectId}?milestone=${v.milestoneId}&action=review`,date:v.createdAt,priority:0,text:`${v.isResult?'نتيجة':'تحديث'} محطة «${v.milestoneTitle}» ينتظر تقييمك. المطلوب: افتح المحطة وقيّم ${v.isResult?'النتيجة':'التقدم'}.`})));
+   }catch{failed.push('تقييمات المشاريع');setReviewQueue([])}
+  }else setReviewQueue([]);
   setErrors(failed);setLoading(false);
- },[]);
+ },[profile?.id,profile?.role]);
  useEffect(()=>{void load()},[load]);
  const role=profile?.role||'MEMBER';
  const memberLike=['MEMBER','APPLICANT'].includes(role);
@@ -65,8 +71,8 @@ export default function WorkspaceHomePage(){
   }
   for(const p of myProposals){list.push({key:`q-${p.proposal_id}`,kind:'proposal',title:p.title,route:`/workspace/proposals/${p.proposal_id}`,date:p.stage_due_at,
    text:p.overdue?`تجاوز المقترح مدة الاستجابة · ${p.days_in_current_stage} يوم`:`ينتظر إجراءً · ${p.days_in_current_stage} يوم في المرحلة`,priority:p.overdue?1:5});}
-  return list.sort((a,b)=>a.priority-b.priority||(a.date||'9999').localeCompare(b.date||'9999')).slice(0,9);
- },[myProjects,myTasks,myRoutines,myProposals,memberLike,projects,oversight,isSecretary]);
+  return [...reviewQueue,...list].sort((a,b)=>a.priority-b.priority||(a.date||'9999').localeCompare(b.date||'9999'));
+ },[myProjects,myTasks,myRoutines,myProposals,memberLike,projects,oversight,isSecretary,reviewQueue]);
  if(!profile)return null;
  return <div className="workspace-stack workspace-home-v3">
   <section className="workspace-home-hero"><div><span className="workspace-kicker">المتابعة والتنفيذ</span><h1>{memberLike?'ما يحتاج منك الآن':profileTitle(profile)}</h1>
@@ -74,16 +80,22 @@ export default function WorkspaceHomePage(){
    {isSecretary&&<div className="workspace-head-actions"><Link className="workspace-primary" to="/workspace/projects/new"><Plus size={16}/>مشروع بنتيجة</Link><Link className="workspace-secondary" to="/workspace/tasks"><ListTodo size={16}/>مهمة بسيطة</Link></div>}
   </section>
   {errors.length>0&&<div className="workspace-card v5-load-alert" role="alert"><AlertTriangle size={18}/><span>تعذر تحميل: {errors.join('، ')}. النتائج الظاهرة قد تكون غير مكتملة، فلا تعتمد عليها لاتخاذ قرار.</span><button className="workspace-secondary" onClick={()=>void load()}>إعادة التحميل</button></div>}
-  <section className="workspace-focus-card"><div className="workspace-focus-head"><div><span>الأولوية الآن</span><h2>{loading?'جارٍ جلب المتابعة…':priority.length?`${priority.length} أمور تحتاج انتباهًا`:'لا توجد مخالفات أو استحقاقات عاجلة ظاهرة'}</h2></div>{priority.length?<AlertTriangle/>:<CheckCircle2/>}</div>
-   {!loading&&priority.length>0&&<div className="workspace-focus-list">{priority.map(item=><Link key={item.key} to={item.route}><div className={`workspace-focus-icon ${item.kind}`}>{item.kind==='project'?<Target/>:item.kind==='task'?<ListTodo/>:item.kind==='routine'?<RefreshCw/>:<FileText/>}</div><div><strong>{item.title}</strong><span>{item.text}</span><small className="v54-action-prompt">الإجراء: افتح {item.kind==='project'?'المشروع وحدد المحطة التي تحتاج إجراءً':item.kind==='proposal'?'المقترح واتخذ القرار':item.kind==='task'?'المهمة وحدّث حالتها':'العمل الدوري وسجّل المخرج'}</small>{item.date&&<small>موعد: {formatDate(item.date)}</small>}</div><ArrowLeft size={16}/></Link>)}</div>}
-   {!loading&&priority.length===0&&errors.length===0&&<p className="v5-focus-empty">لا يعني ذلك اكتمال كل العمل. راجع المشاريع الجارية والتحديثات الدورية أدناه.</p>}
+  <section className="v55-inbox-heading"><div><span className="v55-eyebrow">العمل المطلوب</span><h2>ماذا ينتظر منك؟</h2><p>كل نوع عمل مستقل. اضغط العنصر لتصل إلى المشروع أو المهمة أو المقترح.</p></div><button type="button" className="workspace-secondary" onClick={()=>void load()} disabled={loading}><RefreshCw size={15}/>{loading?'جارٍ التحميل…':'تحديث'}</button></section>
+  {isSecretary&&<Link className="v55-secretary-link" to="/workspace/supervision"><div className="v55-secretary-symbol"><Target size={22}/></div><div><strong>إشراف السكرتارية</strong><span>تابع المشاريع التي فوضتها للنائب، وآخر التحديثات التي لم يراجعها المتابع.</span></div><ArrowLeft size={18}/></Link>}
+  <section className="v55-action-groups">
+   {([{kind:'project',title:'المشاريع',description:'المحطات والتعثرات وقرارات المشاريع',icon:Target,route:'/workspace/projects'},
+      {kind:'task',title:'المهام',description:'التكليفات القصيرة والمواعيد',icon:ListTodo,route:'/workspace/tasks'},
+      {kind:'proposal',title:'المقترحات',description:'قرارات وإجراءات تنتظر الرد',icon:FileText,route:'/workspace/proposals'},
+      {kind:'routine',title:'العمل الدوري',description:'الاستحقاقات المتكررة',icon:RefreshCw,route:'/workspace/routine'}] as const).filter(g=>g.kind!=='proposal'||!memberLike).map(group=>{
+    const Icon=group.icon;
+    const items=priority.filter(x=>x.kind===group.kind);
+    return <div className="v55-action-card" key={group.kind}>
+     <div className="v55-action-head"><span className={`v55-action-icon ${group.kind}`}><Icon size={18}/></span><div><h3>{group.title}</h3><p>{group.description}</p></div><span className="v55-action-count">{items.length}</span></div>
+     <div className="v55-action-list">{loading?<p className="v55-action-empty">جارٍ التحميل…</p>:items.length?items.slice(0,5).map(item=><Link to={item.route} className="v55-action-entry" key={item.key}><div><strong>{item.title}</strong><p>{item.text}</p><small>{item.date?`الموعد: ${formatDate(item.date)} · `:''}افتح العنصر لاتخاذ الإجراء</small></div><ArrowLeft size={16}/></Link>):<p className="v55-action-empty">لا توجد إجراءات مطلوبة حاليًا.</p>}</div>
+     <Link to={group.route} className="v55-action-all">عرض كل {group.title} <ArrowLeft size={14}/></Link>
+    </div>;
+   })}
   </section>
-  <section className="workspace-home-columns three">
-   <div className="workspace-card home-v3-panel"><div className="workspace-card-head"><div><h2>المشاريع</h2><p>النتيجة والتقدم والدليل</p></div><Link to="/workspace/projects">فتح <ArrowLeft size={14}/></Link></div><div className="home-v3-list">{myProjects.slice(0,5).map(p=><Link key={p.project_id} to={`/workspace/projects/${p.project_id}`}><Target/><div><strong>{p.project_title}</strong><span>{p.lead_name}{oversight?` · ${p.secretariat_name}`:''}</span><small>{p.current_milestone_overdue?'محطة إنجاز متأخرة':p.current_milestone?`المحطة: ${p.current_milestone}`:`الموعد النهائي ${formatDate(p.target_due_at)}`}</small></div></Link>)}{!myProjects.length&&<div className="workspace-empty-inline">لا توجد مشاريع نشطة.</div>}</div></div>
-   <div className="workspace-card home-v3-panel"><div className="workspace-card-head"><div><h2>المهام</h2><p>تكليفات قصيرة وواضحة</p></div><Link to="/workspace/tasks">فتح <ArrowLeft size={14}/></Link></div><div className="home-v3-list">{myTasks.filter(x=>!doneTask(x.status)).slice(0,5).map(t=><Link key={t.task_id} to="/workspace/tasks"><ListTodo/><div><strong>{t.title}</strong><span>{t.assignee_name}{oversight?` · ${t.secretariat_name}`:''}</span><small>{t.overdue?'متأخرة':t.due_at?formatDate(t.due_at):'لا موعد محدد'}</small></div></Link>)}{!myTasks.some(x=>!doneTask(x.status))&&<div className="workspace-empty-inline">لا توجد مهام جارية.</div>}</div></div>
-   <div className="workspace-card home-v3-panel"><div className="workspace-card-head"><div><h2>العمل الدوري</h2><p>تقرير شخصي لكل استحقاق</p></div><Link to="/workspace/routine">فتح <ArrowLeft size={14}/></Link></div><div className="home-v3-list">{myRoutines.slice(0,5).map(r=><Link key={r.obligation_id} to="/workspace/routine"><RefreshCw/><div><strong>{r.title}</strong><span>{r.owner_name}{oversight?` · ${r.secretariat_name}`:''}</span><small>{r.overdue?'متأخر':`القادم: ${formatDate(r.next_due_at)}`}</small></div></Link>)}{!myRoutines.length&&<div className="workspace-empty-inline">لا يوجد عمل دوري مفعّل.</div>}</div></div>
-  </section>
-  {!memberLike&&<section className="workspace-card home-v3-panel"><div className="workspace-card-head"><div><h2>المقترحات بانتظار إجراء</h2><p>يظهر زمن بقاء المقترح عند الجهة المعنية</p></div><Link to="/workspace/proposals">فتح المقترحات <ArrowLeft size={14}/></Link></div><div className="home-v3-proposals">{myProposals.slice(0,6).map(p=><Link key={p.proposal_id} to={`/workspace/proposals/${p.proposal_id}`}><FileText/><div><strong>{p.title}</strong><span>{p.overdue?'تجاوز مهلة الاستجابة':`في المرحلة منذ ${p.days_in_current_stage} يوم`}</span></div><small>{oversight?p.secretariat_name:''}</small></Link>)}{!myProposals.length&&<div className="workspace-empty-inline">لا توجد مقترحات بانتظارك.</div>}</div></section>}
   {oversight&&<div className="workspace-home-links"><Link to="/workspace/oversight">المتابعة العامة والاستثناءات <ArrowLeft size={15}/></Link><Link to="/workspace/reports">استخراج تقرير من البيانات <ArrowLeft size={15}/></Link></div>}
  </div>
 }

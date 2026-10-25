@@ -267,3 +267,36 @@ export async function eventAttendance(...args:any[]): Promise<any[]> {
   const rows:any[] = await kmsaCompatTable('event_attendance');
   return eventId ? rows.filter((x:any)=>x.event_id===eventId) : rows;
 }
+
+/** Pending evaluation of the newest update, scoped to projects this person actually supervises. */
+export async function workspaceReviewerQueue(user:Profile, projects:ProjectSheetRow[]):Promise<{projectId:string;title:string;milestoneTitle:string;milestoneId:string;createdAt:string;isResult:boolean}[]> {
+ const active=projects.filter(p=>p.approval_status==='APPROVED'&&p.setup_status==='ACTIVE');
+ if(!active.length)return [];
+ const ids=active.slice(0,100).map(p=>p.project_id);
+ const assigned=await supabase.from('project_supervision_assignments').select('initiative_id,supervisor_id').in('initiative_id',ids);
+ if(assigned.error)throw assigned.error;
+ const direct=new Map((assigned.data||[]).map(x=>[x.initiative_id,x.supervisor_id]));
+ const eligible=active.filter(p=>(direct.get(p.project_id)||p.secretary_id)===user.id);
+ if(!eligible.length)return [];
+ const eid=eligible.map(x=>x.project_id);
+ const [events,reviews,milestones]=await Promise.all([
+  supabase.from('project_activity_entries').select('id,initiative_id,milestone_id,created_at,status_after').in('initiative_id',eid).eq('kind','MILESTONE_UPDATE').order('created_at',{ascending:false}).limit(900),
+  supabase.from('milestone_supervision_events').select('source_activity_id,actor_id').in('initiative_id',eid).in('event_type',['PROGRESS_OK','PROGRESS_FOLLOW_UP','RESULT_OK','RESULT_REVISION']).order('created_at',{ascending:false}).limit(900),
+  supabase.from('results').select('id,initiative_id,milestones(id,title)').in('initiative_id',eid)
+ ]);
+ for(const resp of [events,reviews,milestones])if(resp.error)throw resp.error;
+ const seen=new Set<string>();const reviewed=new Set((reviews.data||[]).map(x=>`${x.source_activity_id}:${x.actor_id}`));
+ const titles=new Map<string,string>();
+ for(const r of milestones.data||[])for(const m of (r.milestones||[]) as {id:string;title:string}[])titles.set(m.id,m.title);
+ const found:{projectId:string;title:string;milestoneTitle:string;milestoneId:string;createdAt:string;isResult:boolean}[]=[];
+ for(const e of events.data||[]){
+  if(!e.milestone_id||seen.has(e.milestone_id))continue;
+  seen.add(e.milestone_id);
+  if(reviewed.has(`${e.id}:${user.id}`))continue;
+  const p=eligible.find(x=>x.project_id===e.initiative_id);if(!p)continue;
+  // Secretary may self-review own project; a deputy/member never reviews their own work.
+  if(p.lead_id===user.id&&!(user.role==='SECRETARY'&&p.secretary_id===user.id))continue;
+  found.push({projectId:p.project_id,title:p.project_title,milestoneId:e.milestone_id,milestoneTitle:titles.get(e.milestone_id)||p.current_milestone||'محطة إنجاز',createdAt:e.created_at,isResult:['READY_FOR_VERIFICATION','VERIFIED'].includes(e.status_after||'')});
+ }
+ return found;
+}

@@ -13,7 +13,7 @@ const monitor=file('supabase/functions/scheduled-monitor/index.ts');
 const types=file('apps/web/src/lib/types.ts');
 check('No organizational structure route',!app.includes('WorkspaceStructurePage')&&!existsSync(join(root,'apps/web/src/pages/WorkspaceStructurePage.tsx')));
 check('Distinct project, task, routine and proposal paths',['/workspace/projects','/workspace/tasks','/workspace/routine','/workspace/proposals'].every(x=>app.includes(x)));
-check('Director sees actionable priority and backend read failures',home.includes('الأولوية الآن')&&home.includes('Promise.allSettled')&&home.includes('النتائج الظاهرة قد تكون غير مكتملة'));
+check('Director sees actionable priority and backend read failures',home.includes('v55-action-groups')&&home.includes('reviewQueue')&&home.includes('Promise.allSettled')&&home.includes('النتائج الظاهرة قد تكون غير مكتملة'));
 check('Pending GS assignment approvals are actionable on home',home.includes("p.approval_status==='PENDING_GS'")&&home.includes("p.approval_status==='RETURNED'"));
 check('GS oversight and report paths',app.includes('/workspace/oversight')&&app.includes('/workspace/reports'));
 check('V5.2 removes mandatory periodic reports and checks milestone due dates', monitor.includes('MILESTONE_CONFIRM_STATUS') && monitor.includes('span*.5') && !file('apps/web/src/pages/WorkspaceProjectPage.tsx').includes('إفادة المسؤول الدورية'));

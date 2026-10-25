@@ -343,7 +343,7 @@ Deno.serve(async(req)=>{
    }
    const note=String(payload.note||'').trim();
    const q=await db.from('milestone_supervision_events').insert({initiative_id:init.id,milestone_id:m.id,actor_id:profile.id,event_type:kind,note:note||null}).select().single();if(q.error)throw q.error;
-   const notificationSent=kind==='UPDATE_REQUEST'?await inboxNotify(db,m.owner_id,'MILESTONE_UPDATE_REQUEST',`المتابع يطلب تحديث محطة: ${m.title}`,note||'حدّث آخر ما حدث في جدول المشروع.','MILESTONE',m.id,`/workspace/projects/${init.id}`):true;
+   const notificationSent=kind==='UPDATE_REQUEST'?await inboxNotify(db,m.owner_id,'MILESTONE_UPDATE_REQUEST',`مشروع ${init.title}: مطلوب تحديث «${m.title}»`,(note?`${note} · `:'')+'المطلوب منك: افتح المحطة وسجّل آخر ما حدث.','MILESTONE',m.id,`/workspace/projects/${init.id}?milestone=${m.id}&action=update`):true;
    await audit(db,profile,actionName,'MILESTONE',m.id,null,q.data);return json({ok:true,event:q.data,notificationSent,warning:!notificationSent?'تم تسجيل الطلب، لكن تعذر إرسال إشعار للمسؤول. تواصل معه مباشرة وتحقق من إعدادات الإشعارات.':null});
   }
 
@@ -361,6 +361,7 @@ Deno.serve(async(req)=>{
    if(latest.error)throw latest.error;
    if(!latest.data)throw new Error('لا يوجد تحديث من المسؤول لتقييمه.');
    const sourceId=latest.data.id;
+   if(payload.expectedSourceActivityId&&payload.expectedSourceActivityId!==sourceId)throw new Error('وصل تحديث جديد أثناء المراجعة. افتح آخر تحديث ثم قيّمه.');
    const note=String(payload.note||'').trim();
    if(['PROGRESS_FOLLOW_UP','RESULT_REVISION'].includes(reviewKind)&&!note)throw new Error('حدد ما الذي يحتاج متابعة أو تعديلًا.');
    const prior=await db.from('milestone_supervision_events').select('id').eq('milestone_id',m.id).eq('actor_id',profile.id).eq('source_activity_id',sourceId).in('event_type',['PROGRESS_OK','PROGRESS_FOLLOW_UP','RESULT_OK','RESULT_REVISION']).limit(1);
@@ -377,7 +378,7 @@ Deno.serve(async(req)=>{
     }
    }
    const reviewLabel=({PROGRESS_OK:'التقدم مناسب',PROGRESS_FOLLOW_UP:'التقدم يحتاج متابعة',RESULT_OK:'النتيجة مناسبة',RESULT_REVISION:'النتيجة تحتاج تعديلًا'} as Record<string,string>)[reviewKind];
-   const notificationSent=await inboxNotify(db,m.owner_id,`MILESTONE_REVIEW_${reviewKind}`,`تقييم المشرف: ${m.title}`,note||reviewLabel,'MILESTONE',m.id,`/workspace/projects/${init.id}`);
+   const notificationSent=await inboxNotify(db,m.owner_id,`MILESTONE_REVIEW_${reviewKind}`,`مشروع ${init.title}: ${isResult?'تقييم نتيجة':'تقييم تقدم'} «${m.title}»`,(note?`${reviewLabel}: ${note}`:reviewLabel)+(reviewKind==='RESULT_REVISION'?' · المطلوب: عدّل وصف النتيجة أو مخرجها.':reviewKind==='PROGRESS_FOLLOW_UP'?' · المطلوب: راجع ملاحظة المشرف وحدّث تقدم المحطة.':''),'MILESTONE',m.id,`/workspace/projects/${init.id}?milestone=${m.id}&action=update`);
    await audit(db,profile,'MILESTONE_QUALITY_REVIEW','MILESTONE',m.id,null,q.data,{source_activity_id:sourceId});
    return json({ok:true,review:q.data,notificationSent,warning:!notificationSent?'حُفظ التقييم، لكن تعذر إرسال الإشعار للمسؤول.':null});
   }
@@ -391,7 +392,7 @@ Deno.serve(async(req)=>{
    if(new Date(proposed).getTime()===new Date(m.due_at).getTime())throw new Error('الموعد الجديد هو نفسه الموعد الحالي.');
    const q=await db.from('milestone_deadline_requests').insert({initiative_id:init.id,milestone_id:m.id,requested_by:profile.id,original_due_at:m.due_at,proposed_due_at:proposed,reason}).select().single();if(q.error)throw q.error;
    const assigned=(await db.from('project_supervision_assignments').select('supervisor_id').eq('initiative_id',init.id).maybeSingle()).data?.supervisor_id||init.secretary_id;
-   if(assigned)await inboxNotify(db,assigned,'DEADLINE_CHANGE_REQUEST',`طلب تغيير موعد محطة: ${m.title}`,reason,'MILESTONE',m.id,`/workspace/projects/${init.id}`);
+   if(assigned)await inboxNotify(db,assigned,'DEADLINE_CHANGE_REQUEST',`مشروع ${init.title}: طلب تغيير موعد «${m.title}»`,`${reason} · المطلوب منك: راجع الموعد المقترح ووافق أو ارفض.`,'MILESTONE',m.id,`/workspace/projects/${init.id}?milestone=${m.id}&action=deadline`);
    await audit(db,profile,actionName,'MILESTONE',m.id,null,q.data);return json({ok:true,request:q.data});
   }
 
@@ -404,7 +405,7 @@ Deno.serve(async(req)=>{
    if(approved&&init.target_due_at&&new Date(q.proposed_due_at)>new Date(init.target_due_at))throw new Error('الموعد المطلوب يتجاوز الموعد النهائي للمشروع.');
    if(approved){const u=await db.from('milestones').update({due_at:q.proposed_due_at,deadline_mode:'ABSOLUTE',relative_to_milestone_id:null,relative_days:null,relative_hours:0,status_updated_at:new Date().toISOString()}).eq('id',m.id);if(u.error)throw u.error;await recalcDependentMilestones(db,m.id);}
    const upd=await db.from('milestone_deadline_requests').update({status:approved?'APPROVED':'REJECTED',decided_by:profile.id,decided_at:new Date().toISOString(),decision_note:String(payload.note||'').trim()||null}).eq('id',q.id).eq('status','PENDING').select().single();if(upd.error)throw upd.error;
-   await inboxNotify(db,q.requested_by,approved?'DEADLINE_APPROVED':'DEADLINE_REJECTED',`طلب موعد محطة: ${m.title}`,approved?'وافق المشرف على الموعد الجديد':'لم يوافق المشرف على الموعد الجديد','MILESTONE',m.id,`/workspace/projects/${init.id}`);
+   await inboxNotify(db,q.requested_by,approved?'DEADLINE_APPROVED':'DEADLINE_REJECTED',`مشروع ${init.title}: ${approved?'قُبل':'رُفض'} تغيير موعد «${m.title}»`,approved?'تم اعتماد الموعد الجديد. راجع موعد المحطة في جدول المشروع.':'لم يُعتمد الموعد المطلوب. استمر وفق الموعد الحالي أو راجع ملاحظة المشرف.','MILESTONE',m.id,`/workspace/projects/${init.id}?milestone=${m.id}&action=deadline`);
    await audit(db,profile,actionName,'MILESTONE',m.id,q,upd.data);return json({ok:true,request:upd.data});
   }
 
@@ -418,6 +419,16 @@ Deno.serve(async(req)=>{
    if(status==='READY_FOR_VERIFICATION'&&m.status!=='READY_FOR_VERIFICATION')patch.completed_reported_at=nowIso;const u=await db.from('milestones').update(patch).eq('id',m.id).select().single();if(u.error)throw u.error;const hh=await computedProjectHealth(db,init.id);const hres=await db.from('initiatives').update({health:hh}).eq('id',init.id);if(hres.error)throw hres.error;if(patch.completed_reported_at){await recalcDependentMilestones(db,m.id);await syncProjectCompletion(db,m.result_id);}await audit(db,profile,'MILESTONE_PROGRESS_UPDATE','MILESTONE',m.id,m,u.data);
    if(status!==m.status||String(nextLeadNote||'')!==String(m.lead_note||'')||String(nextOutcome||'')!==String(m.outcome_text||'')||updateType==='NO_PROGRESS'){
     const entry=await db.from('project_activity_entries').insert({initiative_id:init.id,milestone_id:m.id,author_id:profile.id,kind:'MILESTONE_UPDATE',note:String(payload.leadNote||'').trim()||null,status_after:status,details:{previous_status:m.status,outcome:nextOutcome||null,update_type:updateType}});if(entry.error)throw entry.error;
+    // Notify the actual reviewer about this new version; a previous review never carries over.
+    let reviewerNotified=true;
+    const delegate=(await db.from('project_supervision_assignments').select('supervisor_id').eq('initiative_id',init.id).maybeSingle()).data?.supervisor_id;
+    const reviewerId=delegate||init.secretary_id;
+    if(reviewerId&&reviewerId!==profile.id){
+     reviewerNotified=await inboxNotify(db,reviewerId,status==='READY_FOR_VERIFICATION'?'PROJECT_RESULT_READY':'PROJECT_PROGRESS_UPDATED',
+      `مشروع ${init.title}: ${status==='READY_FOR_VERIFICATION'?'نتيجة جديدة':'تحديث جديد'} في «${m.title}»`,
+      status==='READY_FOR_VERIFICATION'?'المطلوب منك: راجع النتيجة المسجلة وقيّم جودتها.':`المطلوب منك: راجع التقدم الأخير وقيّمه. ${String(payload.leadNote||'').trim()}`,
+      'MILESTONE',m.id,`/workspace/projects/${init.id}?milestone=${m.id}&action=review`);
+    }
     const requests=(await db.from('milestone_supervision_events').select('id,created_at').eq('milestone_id',m.id).eq('event_type','UPDATE_REQUEST').order('created_at',{ascending:false}).limit(1)).data||[];
     if(requests.length&&new Date(requests[0].created_at).getTime()<Date.now()){
      const answered=(await db.from('milestone_supervision_events').select('id').eq('related_request_id',requests[0].id).eq('event_type','REQUEST_ANSWERED').maybeSingle()).data;
@@ -425,7 +436,7 @@ Deno.serve(async(req)=>{
     }
    }
    if(status==='READY_FOR_VERIFICATION'&&m.status==='READY_FOR_VERIFICATION'&&nextOutcome!==m.outcome_text)await syncProjectCompletion(db,m.result_id);
-   if(['AT_RISK','BLOCKED','READY_FOR_VERIFICATION'].includes(status))await queueNotice(db,status==='READY_FOR_VERIFICATION'?'MILESTONE_READY':'PROJECT_NEEDS_ATTENTION','MILESTONE',m.id,{status});return json({ok:true,milestone:u.data});
+   if(['AT_RISK','BLOCKED','READY_FOR_VERIFICATION'].includes(status))await queueNotice(db,status==='READY_FOR_VERIFICATION'?'MILESTONE_READY':'PROJECT_NEEDS_ATTENTION','MILESTONE',m.id,{status});return json({ok:true,milestone:u.data,warning:!reviewerNotified?'حُفظ التحديث لكن تعذر إرسال الإشعار للمشرف. تأكد من صندوق الإشعارات أو أخبر المتابع مباشرة.':null});
   }
   if(actionName==='MILESTONE_SECRETARY_NOTE'){
    const m=await getMilestone(db,payload.milestoneId);const result=await getResult(db,m.result_id);const init=result.initiative;if(!await canFollowProject(db,profile,init))throw new Error('المتابع المباشر فقط يضيف ملاحظته.');if(init.approval_status!=='APPROVED'||init.setup_status!=='ACTIVE')throw new Error('لا تضاف ملاحظات تنفيذية قبل اعتماد المشروع.');const u=await db.from('milestones').update({secretary_note:payload.note||null}).eq('id',m.id).select().single();if(u.error)throw u.error;await audit(db,profile,'MILESTONE_SECRETARY_NOTE','MILESTONE',m.id,m,u.data);if(String(payload.note||'').trim()){const entry=await db.from('project_activity_entries').insert({initiative_id:init.id,milestone_id:m.id,author_id:profile.id,kind:'SECRETARY_NOTE',note:String(payload.note).trim()});if(entry.error)throw entry.error;}return json({ok:true,milestone:u.data});

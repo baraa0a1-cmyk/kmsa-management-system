@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, ArrowRight, CheckCircle2, Clock3, ExternalLink, FileText, Info, Link2, MessageSquareText, Plus, CalendarClock, History, Pencil, ChevronDown, LoaderCircle } from 'lucide-react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { memberDirectorySearch, uploadToStaging, workflow, workspaceProject } from '../lib/api';
 import { useAuth } from '../hooks/useAuth';
 import type { Milestone, MilestoneStatus, ProjectActivityEntry, ProjectBundle } from '../lib/types';
@@ -21,7 +21,7 @@ const localDateTime=(date?:string|null)=>date?new Date(new Date(date).getTime()-
 const updateTypes=Object.entries(updateMeta).map(([value,meta])=>({value,label:meta.label}));
 
 export default function WorkspaceProjectPage(){
- const {id}=useParams();const {profile}=useAuth();
+ const {id}=useParams();const {profile}=useAuth();const [searchParams,setSearchParams]=useSearchParams();
  const [bundle,setBundle]=useState<ProjectBundle|null>(null);const [loading,setLoading]=useState(true);
  const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [notice,setNotice]=useState('');
  const [reviewTarget,setReviewTarget]=useState<'progress'|'result'>('progress');const [reviewKind,setReviewKind]=useState('PROGRESS_OK');const [reviewNote,setReviewNote]=useState('');
@@ -45,6 +45,19 @@ export default function WorkspaceProjectPage(){
  const maySupervise=supervisor&&!!profile&&(profile.id!==init?.owner_id||(profile.role==='SECRETARY'&&profile.id===init?.secretary_id));
  const reviewable=init?.approval_status==='APPROVED'&&init.setup_status==='ACTIVE'&&!['CANCELLED'].includes(init.status);
  const executing=reviewable&&init?.status!=='COMPLETED';
+ // A notification opens the action, not merely the project home page.
+ useEffect(()=>{const milestoneId=searchParams.get('milestone');if(!milestoneId||!bundle)return;
+  const target=bundle.milestones.find(m=>m.id===milestoneId);
+  const action=searchParams.get('action');
+  if(target){
+   if(action==='review'&&maySupervise&&reviewable)openReview(target,['READY_FOR_VERIFICATION','VERIFIED'].includes(target.status)?'result':'progress');
+   else if(action==='update'&&lead&&executing)openUpdate(target);
+   else if(action==='deadline'&&maySupervise&&reviewable)openAction('deadline-decide',target);
+   else{setSelected(target);setModal('milestone-info');}
+  }
+  const next=new URLSearchParams(searchParams);next.delete('milestone');next.delete('action');setSearchParams(next,{replace:true});
+ },[bundle,searchParams,setSearchParams,lead,maySupervise,reviewable,executing]);
+
  const milestones=useMemo(()=>[...(bundle?.milestones||[])].filter(m=>m.design_status!=='REJECTED').sort((a,b)=>(a.sequence_no||999)-(b.sequence_no||999)||new Date(a.due_at).getTime()-new Date(b.due_at).getTime()),[bundle]);
  const activities=bundle?.activity||[];const overdue=false;
  const total=milestones.length;const verified=milestones.filter(m=>['READY_FOR_VERIFICATION','VERIFIED'].includes(m.status)).length;
@@ -111,15 +124,19 @@ export default function WorkspaceProjectPage(){
      const deadlineIsLatest=!!newestDeadline&&(!lastUpdate||new Date(newestDeadline.created_at).getTime()>new Date(lastUpdate.created_at).getTime());
      const lastShownTime=deadlineIsLatest?newestDeadline?.created_at:lastUpdate?.created_at;
      const lastShownText=deadlineIsLatest?`طلب تغيير الموعد إلى ${formatDateTime(newestDeadline!.proposed_due_at)}: ${newestDeadline!.reason}`:lastUpdate?.note;
-     const lastProgress=events.find(e=>!['COMPLETE','DEADLINE_CHANGE'].includes(String(e.details?.update_type||''))&&e.status_after!=='READY_FOR_VERIFICATION');
+     // The current review belongs ONLY to the latest submitted progress update.
+     // Earlier reviews stay in the immutable timeline but cannot endorse a new update.
      const completed=['READY_FOR_VERIFICATION','VERIFIED'].includes(m.status);
+     const lastProgress=!completed&&lastUpdate&&String(lastUpdate.details?.update_type||'')!=='DEADLINE_CHANGE'?lastUpdate:null;
      const progressReview=bundle.supervisionEvents.find(e=>e.milestone_id===m.id&&['PROGRESS_OK','PROGRESS_FOLLOW_UP'].includes(e.event_type)&&e.source_activity_id===lastProgress?.id);
      const resultUpdate=events.find(e=>e.status_after==='READY_FOR_VERIFICATION');
      const resultReview=bundle.supervisionEvents.find(e=>e.milestone_id===m.id&&['RESULT_OK','RESULT_REVISION'].includes(e.event_type)&&e.source_activity_id===resultUpdate?.id);
      const revisions=resultReview?.event_type==='RESULT_REVISION';
-     const latestFeedback=bundle.supervisionEvents.find(e=>e.milestone_id===m.id&&e.source_activity_id===(completed?resultUpdate?.id:lastUpdate?.id)&&['PROGRESS_FOLLOW_UP','RESULT_REVISION'].includes(e.event_type));
+     const latestFeedback=bundle.supervisionEvents.find(e=>e.milestone_id===m.id&&e.source_activity_id===(completed?resultUpdate?.id:lastProgress?.id)&&['PROGRESS_FOLLOW_UP','RESULT_REVISION'].includes(e.event_type));
      const leadCanEdit=lead&&(executing||(revisions&&init.approval_status==='APPROVED'))&&m.status!=='VERIFIED'&&m.status!=='CANCELLED';
      const pendingDeadline=bundle.deadlineRequests.find(e=>e.milestone_id===m.id&&e.status==='PENDING');
+     const lastUpdateRequest=bundle.supervisionEvents.find(e=>e.milestone_id===m.id&&e.event_type==='UPDATE_REQUEST');
+     const updateRequestPending=!!lastUpdateRequest&&!bundle.supervisionEvents.some(e=>e.event_type==='REQUEST_ANSWERED'&&e.related_request_id===lastUpdateRequest.id);
      const kind=deadlineIsLatest?'DEADLINE_CHANGE':String(lastUpdate?.details?.update_type||'');
      return <tr key={m.id} className={displayRisk(m)?'v54-danger-row':''}>
       <td><div className="v54-m-title"><span className="v54-index">{index+1}</span><div><strong>{m.title}</strong><small title={m.verification_criteria}>{m.verification_criteria||' '}</small></div></div></td>
@@ -127,9 +144,9 @@ export default function WorkspaceProjectPage(){
       <td>{leadCanEdit&&!completed?<div className={`v54-state-select v54-state-${viewStatus(m.status).toLowerCase()}`}><select aria-label={`حالة ${m.title}`} value={viewStatus(m.status)} disabled={busy} onChange={e=>openUpdate(m,e.target.value as MilestoneStatus)}>{editableStatuses.map(st=><option key={st} value={st}>{statusText[st]}</option>)}</select><ChevronDown size={15}/></div>:<span className={`v54-static-state v54-state-${viewStatus(m.status).toLowerCase()}`}>{statusText[viewStatus(m.status)]||'جارٍ العمل'}</span>}</td>
       <td><div className="v54-last"><div className="v54-last-top">{lastShownTime&&<span className={`v54-kind v54-kind-${updateMeta[kind]?.tone||'quiet'}`}>{updateMeta[kind]?.label||'تحديث'}</span>}{lastShownTime?<button title={`آخر تحديث: ${formatDateTime(lastShownTime)}`} aria-label={`معلومات آخر تحديث للمحطة ${m.title}`} className="v54-icon-btn" onClick={()=>{setSelected(m);setModal('milestone-info')}}><Info size={16}/></button>:null}</div><span className="v54-truncate" title={lastShownText||''}>{lastShownText||'لم يسجل تحديث بعد'}</span>{leadCanEdit&&<button className="v54-inline-edit" onClick={()=>openUpdate(m)}><Pencil size={13}/>تحديث</button>}</div></td>
       <td><div className="v54-result"><span className="v54-truncate" title={m.outcome_text||''}>{completed?(m.outcome_text||'لم توصف النتيجة'):'—'}</span>{revisions&&<small className="v54-pending">المشرف طلب تعديل النتيجة</small>}{revisions&&leadCanEdit&&<button className="v54-inline-edit" onClick={()=>openUpdate(m,'READY_FOR_VERIFICATION')}><Pencil size={13}/>تعديل النتيجة</button>}</div></td>
-      <td><div className="v54-evaluation"><span className={`v54-eval ${progressReview?.event_type==='PROGRESS_OK'?'good':progressReview?'warn':''}`}>{progressReview?.event_type==='PROGRESS_OK'?'مناسب':progressReview?.event_type==='PROGRESS_FOLLOW_UP'?'يحتاج متابعة':lastProgress?'لم يُقيّم بعد':'—'}</span>{maySupervise&&reviewable&&!completed&&lastUpdate&&!progressReview&&<button className="v54-inline-edit" onClick={()=>openReview(m,'progress')}>تقييم التحديث</button>}</div></td>
+      <td><div className="v54-evaluation"><span className={`v54-eval ${progressReview?.event_type==='PROGRESS_OK'?'good':progressReview?'warn':''}`}>{progressReview?.event_type==='PROGRESS_OK'?'مناسب':progressReview?.event_type==='PROGRESS_FOLLOW_UP'?'يحتاج متابعة':lastProgress?'تحديث جديد · لم يُقيّم':'—'}</span>{maySupervise&&reviewable&&!completed&&lastProgress&&!progressReview&&<button className="v54-inline-edit" onClick={()=>openReview(m,'progress')}>تقييم التحديث</button>}</div></td>
       <td><div className="v54-evaluation">{completed?<><span className={`v54-eval ${resultReview?.event_type==='RESULT_OK'?'good':resultReview?'warn':''}`}>{resultReview?.event_type==='RESULT_OK'?'النتيجة مناسبة':resultReview?.event_type==='RESULT_REVISION'?'تحتاج تعديلًا':'لم تُقيّم بعد'}</span>{maySupervise&&reviewable&&!resultReview&&<button className="v54-inline-edit" onClick={()=>openReview(m,'result')}>تقييم النتيجة</button>}</>:<span className="v54-empty">—</span>}</div></td>
-      <td><div className="v54-notes"><span className="v54-truncate" title={latestFeedback?.note||m.secretary_note||''}>{latestFeedback?.note||m.secretary_note||'—'}</span>{latestFeedback?.note&&<small className="v54-note-author">ملاحظة على {latestFeedback.event_type==='RESULT_REVISION'?'النتيجة':'التقدم'}</small>}{supervisor&&executing&&<button className="v54-inline-edit" onClick={()=>openAction('note',m)}><Pencil size={13}/>إضافة ملاحظة</button>}{maySupervise&&executing&&!completed&&<button disabled={busy} className="v54-inline-edit" title="يُرسل إشعارًا للمسؤول ليحدّث وضع المحطة" onClick={()=>openAction('update-request',m)}><MessageSquareText size={13}/>طلب تحديث</button>}</div></td>
+      <td><div className="v54-notes"><span className="v54-truncate" title={latestFeedback?.note||m.secretary_note||''}>{latestFeedback?.note||m.secretary_note||'—'}</span>{latestFeedback?.note&&<small className="v54-note-author">ملاحظة على {latestFeedback.event_type==='RESULT_REVISION'?'النتيجة':'التقدم'}</small>}{supervisor&&executing&&<button className="v54-inline-edit" onClick={()=>openAction('note',m)}><Pencil size={13}/>إضافة ملاحظة</button>}{maySupervise&&executing&&!completed&&(updateRequestPending?<small className="v54-pending" title="سبق إرسال طلب لهذه المحطة، وينتظر تحديث المسؤول">بانتظار رد المسؤول على طلب التحديث</small>:<button disabled={busy} className="v54-inline-edit" title="يُرسل إشعارًا للمسؤول ليحدّث وضع المحطة" onClick={()=>openAction('update-request',m)}><MessageSquareText size={13}/>طلب تحديث</button>)}</div></td>
      </tr>;
     })}</tbody></table></div>
    </section>
@@ -137,7 +154,7 @@ export default function WorkspaceProjectPage(){
    <Modal open={modal==='update'} title={`تحديث محطة — ${selected?.title||''}`} onClose={()=>setModal(null)} footer={<button className="workspace-primary" disabled={busy||!selected||((draftStatus[selected?.id||'']||selected.status)==='READY_FOR_VERIFICATION'&&!draftOutcome[selected?.id||'']?.trim())} onClick={()=>selected&&saveMilestone(selected)}>{busy?<><LoaderCircle size={16} className="v54-spin"/>جارٍ الحفظ…</>:'حفظ التحديث'}</button>}>
      {selected&&<div className="v54-form"><div className="v54-two"><div className="field"><label>حالة المحطة</label><select className="select" value={viewStatus(draftStatus[selected.id]||selected.status)} onChange={e=>setDraftStatus(v=>({...v,[selected.id]:e.target.value as MilestoneStatus}))}>{editableStatuses.map(st=><option key={st} value={st}>{statusText[st]}</option>)}</select></div><div className="field"><label>نوع آخر ما حدث</label><select className="select" value={draftType[selected.id]||'PROGRESS'} onChange={e=>{const kind=e.target.value;if(kind==='DEADLINE_CHANGE'){openAction('deadline',selected);return;}setDraftType(v=>({...v,[selected.id]:kind}));if(kind==='BLOCKER')setDraftStatus(v=>({...v,[selected.id]:'BLOCKED'}));}}>{updateTypes.map(t=><option key={t.value} value={t.value}>{t.label}</option>)}</select></div></div><div className="field"><label>ما الذي حدث؟</label><textarea className="textarea" rows={3} value={draftNote[selected.id]||''} placeholder="مثال: استلمنا 12 مقالة بعد مراجعتها" onChange={e=>setDraftNote(v=>({...v,[selected.id]:e.target.value}))}/></div>{viewStatus(draftStatus[selected.id]||selected.status)==='READY_FOR_VERIFICATION'&&<div className="field"><label>صف النتيجة النهائية بصورة محددة *</label><textarea className="textarea" rows={3} value={draftOutcome[selected.id]||''} placeholder="مثال: اتُفق مع المستشفى على التدريب يوم 13 نوفمبر من 9 حتى 12" onChange={e=>setDraftOutcome(v=>({...v,[selected.id]:e.target.value}))}/></div>}<div className="v54-optional"><button className="workspace-secondary small" onClick={()=>openAction('reference',selected)}><Link2 size={15}/>إضافة رابط / مستند</button><label className="followup-upload-select"><FileText size={15}/>{fileDraft[selected.id]?.name||'اختيار ملف'}<input type="file" accept=".pdf,.png,.jpg,.jpeg,.docx" onChange={e=>setFileDraft(v=>({...v,[selected.id]:e.target.files?.[0]||null}))}/></label>{fileDraft[selected.id]&&<button className="workspace-secondary small" disabled={busy} onClick={()=>sendFile(selected)}>رفع الملف</button>}</div></div>}
    </Modal>
-   <Modal open={modal==='review'} title={`${reviewTarget==='result'?'تقييم النتيجة':'تقييم التحديث'} — ${selected?.title||''}`}  onClose={()=>setModal(null)} footer={<button className="workspace-primary" disabled={busy||!selected||(['RESULT_REVISION','PROGRESS_FOLLOW_UP'].includes(reviewKind)&&!reviewNote.trim())} onClick={()=>selected&&act('MILESTONE_QUALITY_REVIEW',{milestoneId:selected.id,reviewKind,note:reviewNote})}>{busy?'جارٍ الحفظ…':'حفظ التقييم'}</button>}>
+   <Modal open={modal==='review'} title={`${reviewTarget==='result'?'تقييم النتيجة':'تقييم التحديث'} — ${selected?.title||''}`}  onClose={()=>setModal(null)} footer={<button className="workspace-primary" disabled={busy||!selected||(['RESULT_REVISION','PROGRESS_FOLLOW_UP'].includes(reviewKind)&&!reviewNote.trim())} onClick={()=>selected&&act('MILESTONE_QUALITY_REVIEW',{milestoneId:selected.id,reviewKind,note:reviewNote,expectedSourceActivityId:activities.find(e=>e.milestone_id===selected.id&&e.kind==='MILESTONE_UPDATE')?.id})}>{busy?'جارٍ الحفظ…':'حفظ التقييم'}</button>}>
      {selected&&<div className="v53-review-dialog"><p className="muted">تقييمك مستقل ولا يوقف استمرار العمل. ستظهر ملاحظتك لمسؤول المشروع مع نوع التقييم.</p><div className="v53-review-snapshot"><strong>المطلوب: {selected.verification_criteria}</strong><span>{reviewTarget==='result'?'النتيجة المسجلة: ':'آخر تحديث: '}{reviewTarget==='result'?selected.outcome_text||'لا توجد نتيجة':activities.find(e=>e.milestone_id===selected.id&&e.kind==='MILESTONE_UPDATE')?.note||'لا يوجد تحديث'}</span></div><div className="v53-review-choices">{(reviewTarget==='result'?[{value:'RESULT_OK',label:'النتيجة مناسبة'},{value:'RESULT_REVISION',label:'تحتاج تعديلًا'}]:[{value:'PROGRESS_OK',label:'مناسب'},{value:'PROGRESS_FOLLOW_UP',label:'يحتاج متابعة'}]).map(option=><label key={option.value} className={reviewKind===option.value?'active':''}><input type="radio" name="v53-review" value={option.value} checked={reviewKind===option.value} onChange={()=>setReviewKind(option.value)}/>{option.label}</label>)}</div>{['RESULT_REVISION','PROGRESS_FOLLOW_UP'].includes(reviewKind)&&<div className="field"><label>ما المطلوب من المسؤول؟ *</label><textarea rows={3} className="textarea" value={reviewNote} onChange={e=>setReviewNote(e.target.value)} placeholder="اكتب الملاحظة أو التصحيح المطلوب بوضوح"/></div>}</div>}
    </Modal>
    <Modal open={modal==='milestone-info'} title={`آخر تحديث — ${selected?.title||''}`} onClose={()=>setModal(null)} className="v54-quick-info-modal">
