@@ -7,11 +7,11 @@ const workflow=src('supabase/functions/workflow/index.ts');
 const cycle=src('apps/web/src/components/KmsaCycleSwitchPanel.tsx');
 const tests=[
  ['No obsolete cycle activation JSX',!admin.includes("false&&cycle.status==='DRAFT'")],
- ['Safe cycle-switch UI in place',admin.includes('KmsaCycleSwitchPanel')&&cycle.includes('kmsa_switch_current_cycle')],
+ ['Safe cycle-switch UI in place',admin.includes('kmsa_switch_current_cycle')&&admin.includes('kmsa_cycle_preview')],
  ['No browser-native confirmation calls',!admin.includes('window.confirm(')],
- ['All CSV row selection is supported',admin.includes('selectedImportRows')&&imp.includes('displayed.slice(page*25')],
+ ['All CSV row selection is supported',admin.includes('selectedRows')&&imp.includes('displayed.slice(page*25')],
  ['Every selected row needs confirmed server validation',imp.includes("if(!checked)return 'checking'")&&imp.includes("checked.status==='READY'?'ready':'review'")],
- ['Selected CSV with same filename triggers fresh validation',admin.includes('fileRevision')&&admin.includes('setFileRevision(n=>n+1)')],
+ ['Selected CSV with same filename triggers fresh validation',admin.includes('fileRevision')&&admin.includes('setFileRevision(x=>x+1)')],
  ['Backend duplicate IDs checked',workflow.includes(".eq('university_id',uid)")],
  ['Old unsafe activation endpoint disabled',workflow.includes('اعتماد الدورة متاح فقط من واجهة إدارة v6 الآمنة.')],
  ['Shared initial passwords require change',workflow.includes('must_change_password:true')],

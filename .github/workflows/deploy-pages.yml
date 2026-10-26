@@ -51,6 +51,8 @@ jobs:
         run: node ../../scripts/v5-9-check.mjs
       - name: Verify v6 integration and safety
         run: node ../../scripts/v6-integration-check.mjs
+      - name: Verify v6.1 administration redesign
+        run: node ../../scripts/v6-1-check.mjs
       - name: Build
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}

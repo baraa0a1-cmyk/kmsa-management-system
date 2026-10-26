@@ -22,9 +22,9 @@ check('password reset generates random temporary',wf.includes('crypto.getRandomV
 check('password reset does not expose prior password',!wf.includes('currentPassword:')&&!sql.includes('password_plaintext'));
 check('admin actions blocked from project operations',wf.includes('مدير النظام يدير الدورات والحسابات فقط'));
 check('positions are scoped to current cycle',wf.includes('pos.cycle_id!==currentId'));
-check('CSV RFC4180 quotes supported',ad.includes('function parseCsv')&&ad.includes("source[i+1]==='\"'"));
-check('CSV validates identifiers',ad.includes('knownEmails.has(mail)')&&ad.includes('knownIds.has(universityId)'));
-check('CSV import visible progress',ad.includes('setImportProgress('));
+check('CSV RFC4180 quotes supported',ad.includes('function csvRows')&&ad.includes("source[i+1]==='\"'"));
+check('CSV validates identifiers',ad.includes('emails.has(email)')&&ad.includes('ids.has(universityId)'));
+check('CSV import visible progress',ad.includes('setProgress('));
 check('admin reset UI',ad.includes("'ADMIN_RESET_PASSWORD'"));
 check('project filter by supervisors',pr.includes('supervisorIds'));
 check('project date range filter',pr.includes('fromDate')&&pr.includes('toDate'));
