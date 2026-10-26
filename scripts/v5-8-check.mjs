@@ -14,7 +14,7 @@ check('supervision events cycle restricted',sql.includes('milestone_supervision_
 check('proposals scoped',sql.includes('proposals_current_cycle_guard'));
 check('project sheet scopes cycle',sql.includes('i.cycle_id=public.kmsa_active_cycle_id()'));
 check('member directory scoped',sql.includes('member_directory_search')&&sql.includes('m.cycle_id=public.kmsa_active_cycle_id()'));
-check('bulk import requires batch membership',wf.includes("if(actionName==='ADMIN_BATCH_IMPORT')")&&wf.includes(".from('cycle_batches')"));
+check('v5.9 bulk import uses independent batches',wf.includes("if(actionName==='ADMIN_BATCH_IMPORT')")&&wf.includes(".from('kmsa_batches')"));
 check('bulk import idempotent check',wf.includes('existingEmail.id!==existingUid.id')&&wf.includes("status:'EXISTS'"));
 check('bulk import creates auth account',wf.includes('db.auth.admin.createUser'));
 check('bulk import forces password change',wf.includes('must_change_password:true'));
@@ -23,8 +23,8 @@ check('password reset does not expose prior password',!wf.includes('currentPassw
 check('admin actions blocked from project operations',wf.includes('مدير النظام يدير الدورات والحسابات فقط'));
 check('positions are scoped to current cycle',wf.includes('pos.cycle_id!==currentId'));
 check('CSV RFC4180 quotes supported',ad.includes('function parseCsv')&&ad.includes("source[i+1]==='\"'"));
-check('CSV validates identifiers',ad.includes('emails.has(email)')&&ad.includes('ids.has(universityId)'));
-check('CSV import visible progress',ad.includes('setResults([...all])'));
+check('CSV validates identifiers',ad.includes('knownEmails.has(mail)')&&ad.includes('knownIds.has(universityId)'));
+check('CSV import visible progress',ad.includes('setImportProgress('));
 check('admin reset UI',ad.includes("'ADMIN_RESET_PASSWORD'"));
 check('project filter by supervisors',pr.includes('supervisorIds'));
 check('project date range filter',pr.includes('fromDate')&&pr.includes('toDate'));

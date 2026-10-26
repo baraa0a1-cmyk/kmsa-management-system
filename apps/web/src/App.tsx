@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { AppShell } from './components/AppShell';
 import LoginPage from './pages/LoginPage';
@@ -28,8 +28,8 @@ import WorkspaceRoutinePage from './pages/WorkspaceRoutinePage';
 import WorkspaceTasksPage from './pages/WorkspaceTasksPage';
 import MilestonePage from './pages/MilestonePage';
 
-function Guard({children}:{children:React.ReactNode}){const {session,profile,loading}=useAuth(); if(loading)return <div className="splash"><div className="loader"/><div>جارٍ تجهيز حسابك…</div></div>; if(!session)return <Navigate to="/login" replace/>; if(profile?.must_change_password)return <Navigate to="/change-password" replace/>; return <>{children}</>}
-function LoginGuard(){const {session,loading}=useAuth();if(loading)return <div className="splash"><div className="loader"/></div>;return session?<Navigate to="/" replace/>:<LoginPage/>}
+function Guard({children}:{children:React.ReactNode}){const {session,profile,loading}=useAuth();const {pathname}=useLocation(); if(loading)return <div className="splash"><div className="loader"/><div>جارٍ تجهيز حسابك…</div></div>; if(!session)return <Navigate to="/login" replace/>; if(profile?.must_change_password)return <Navigate to="/change-password" replace/>; if(profile?.role==='ADMIN' && pathname!=='/workspace/admin')return <Navigate to="/workspace/admin" replace/>;return <>{children}</>}
+function LoginGuard(){const {session,profile,loading}=useAuth();if(loading)return <div className="splash"><div className="loader"/></div>;return session?<Navigate to={profile?.role==='ADMIN'?'/workspace/admin':'/'} replace/>:<LoginPage/>}
 function WorkspaceOnly({children}:{children:React.ReactNode}){const {profile}=useAuth();return profile?<>{children}</>:<Navigate to="/" replace/>}
 function SecretaryOrAbove({children}:{children:React.ReactNode}){const {profile}=useAuth();return profile&&['SECRETARY','GS','PRESIDENT','ADMIN'].includes(profile.role)?<>{children}</>:<Navigate to="/workspace" replace/>}
 function SecretaryOrAdmin({children}:{children:React.ReactNode}){const {profile}=useAuth();return profile&&['SECRETARY','ADMIN'].includes(profile.role)?<>{children}</>:<Navigate to="/workspace" replace/>}

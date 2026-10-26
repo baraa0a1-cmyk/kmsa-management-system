@@ -47,6 +47,8 @@ jobs:
         run: node ../../scripts/v5-7-check.mjs
       - name: Verify v5.8 cycle and import invariants
         run: node ../../scripts/v5-8-check.mjs
+      - name: Verify v5.9 administration, batches and cycle separation
+        run: node ../../scripts/v5-9-check.mjs
       - name: Build
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}

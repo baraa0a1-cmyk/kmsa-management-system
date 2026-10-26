@@ -76,6 +76,9 @@ function MemberShell(){
  </div>
 }
 
+
+function AdminShell(){const nav=useNavigate();const {profile}=useAuth();return <div className="v59-admin-shell" dir="rtl"><header className="v59-admin-top"><div className="v59-admin-brand"><img src={`${import.meta.env.BASE_URL}kmsa-logo.png`} alt="شعار رابطة طلاب كلية الطب"/><div><strong>رابطة طلاب كلية الطب</strong><small>جامعة الخرطوم · إدارة النظام</small></div></div><div className="v59-admin-account"><span>{profile?.full_name||'مدير النظام'}</span><button onClick={()=>nav('/change-password')}><UserRound size={16}/> كلمة المرور</button><button onClick={async()=>{await signOut();nav('/login')}}><LogOut size={16}/> خروج</button></div></header><main className="v59-admin-main"><Outlet/></main></div>}
+
 function WorkspaceShell(){
  const {profile}=useAuth(); const nav=useNavigate(); const [open,setOpen]=useState(false); const {pathname}=useLocation(); if(!profile)return null;
  const allowed=workspaceItems.filter(i=>i.roles.includes(profile.role));
@@ -91,4 +94,4 @@ function WorkspaceShell(){
  </div>
 }
 
-export function AppShell(){const {pathname}=useLocation();return pathname.startsWith('/workspace')?<WorkspaceShell/>:<MemberShell/>}
+export function AppShell(){const {pathname}=useLocation();const {profile}=useAuth();if(profile?.role==='ADMIN')return <AdminShell/>;return pathname.startsWith('/workspace')?<WorkspaceShell/>:<MemberShell/>}
