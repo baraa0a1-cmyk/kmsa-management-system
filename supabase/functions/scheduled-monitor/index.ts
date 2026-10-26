@@ -31,15 +31,16 @@ Deno.serve(async(req)=>{if(req.method==='OPTIONS')return new Response('ok',{head
   const {data:progress}=await db.from('project_activity_entries').select('created_at,details').eq('milestone_id',m.id).eq('kind','MILESTONE_UPDATE').order('created_at',{ascending:false}).limit(30);
   const lastProgress=(progress||[]).find((e:any)=>['PROGRESS','COMPLETE'].includes(String(e.details?.update_type||'PROGRESS')));
   const lastProgressMs=lastProgress?new Date(lastProgress.created_at).getTime():created;
+  const lastReportMs=(progress||[]).length?new Date(progress![0].created_at).getTime():created;
   const remaining=due-nowMs;const proportion=span<=3*86400000?86400000:span<=14*86400000?span*.25:span*.5;
   const firstCheck=span<=3*86400000?due-86400000:span<=14*86400000?due-span*.25:created+span*.5;
   const late=remaining<0;
-  const needsInfo=late||(nowMs>=firstCheck&&lastProgressMs<firstCheck);
+  const needsInfo=late?lastReportMs<due:(nowMs>=firstCheck&&lastReportMs<firstCheck); // a truthful 'no progress' reply counts as a reply, not achievement
   if(needsInfo){
-   const {data:recentReminder}=await db.from('notification_log').select('id').eq('event_type','MILESTONE_CONFIRM_STATUS').eq('entity_type','MILESTONE').eq('entity_id',m.id).gte('created_at',new Date(nowMs-24*3600000).toISOString()).limit(1);
+   const {data:recentReminder}=await db.from('notification_log').select('id').eq('event_type','MILESTONE_CONFIRM_STATUS').eq('entity_type','MILESTONE').eq('entity_id',m.id).gte('created_at',new Date(nowMs-(late?24:72)*3600000).toISOString()).limit(1);
    if(!(recentReminder||[]).length){
-    await inboxNotify(db,m.owner_id,'MILESTONE_CONFIRM_STATUS',`يرجى تأكيد الوضع: ${m.title}`,late?'تجاوز موعد المحطة. سجّل ما حدث أو عدم حدوث تقدم.':'اقتربت نقطة المتابعة ولم يظهر تقدم جديد. يكفي تحديث خلية آخر ما حدث.','MILESTONE',m.id,`/workspace/projects/${project.id}`);
-    await db.from('notification_log').insert({channel:'SYSTEM',recipient:m.owner_id,event_type:'MILESTONE_CONFIRM_STATUS',entity_type:'MILESTONE',entity_id:m.id,status:'SENT'});
+    const delivered=await inboxNotify(db,m.owner_id,'MILESTONE_CONFIRM_STATUS',`مشروع ${project.title}: يرجى تأكيد الوضع — ${m.title}`,late?'المحطة تجاوزت موعدها. حدّث آخر ما حدث أو سجل عدم تقدم.':'اقترب موعد المحطة ولم تصل معلومة كافية؛ حدّث آخر ما حدث.','MILESTONE',m.id,`/workspace/projects/${project.id}?milestone=${m.id}&action=update`);
+    if(delivered)await db.from('notification_log').insert({channel:'SYSTEM',recipient:m.owner_id,event_type:'MILESTONE_CONFIRM_STATUS',entity_type:'MILESTONE',entity_id:m.id,status:'SENT'});
    }
    // An unanswered reminder becomes a supervision issue after 48h, not an automatic accusation.
    const {data:oldReminders}=await db.from('notification_log').select('created_at').eq('event_type','MILESTONE_CONFIRM_STATUS').eq('entity_type','MILESTONE').eq('entity_id',m.id).lt('created_at',new Date(nowMs-48*3600000).toISOString()).order('created_at',{ascending:false}).limit(1);
@@ -48,40 +49,36 @@ Deno.serve(async(req)=>{if(req.method==='OPTIONS')return new Response('ok',{head
     if(assigned)await inboxNotify(db,assigned,'MILESTONE_AWAITING_CLARIFICATION',`محطة تحتاج استيضاحًا: ${m.title}`,'طلب النظام تأكيد الوضع ولم يظهر تقدم موثق بعد؛ راجع المسؤول عند الحاجة.','MILESTONE',m.id,`/workspace/projects/${project.id}`);
    }
   }
-  // Supervision runs alongside delivery. Normal progress does not require permission to continue.
-  const reviewPoints=span>14*86400000?[created+span*.5,due-span*.15]:[firstCheck];
-  for(let k=0;k<reviewPoints.length;k++){
-   const checkpoint=reviewPoints[k];if(nowMs<checkpoint)continue;
-   const {data:review}=await db.from('milestone_supervision_events').select('id').eq('milestone_id',m.id).in('event_type',['PROGRESS_REVIEW','COMPLETION_READ','PROGRESS_OK','PROGRESS_FOLLOW_UP','RESULT_OK','RESULT_REVISION']).gte('created_at',new Date(checkpoint).toISOString()).limit(1);
-   if((review||[]).length)continue;
-   const tag=`MILESTONE_SUPERVISOR_REVIEW_${k+1}`;
-   const {data:sent}=await db.from('notification_log').select('created_at').eq('event_type',tag).eq('entity_type','MILESTONE').eq('entity_id',m.id).limit(1);
-   const assigned=(await db.from('project_supervision_assignments').select('supervisor_id').eq('initiative_id',project.id).maybeSingle()).data?.supervisor_id||project.secretary_id;
-   if(!assigned)continue;
-   if(!(sent||[]).length){
-    await inboxNotify(db,assigned,tag,`مراجعة سير محطة: ${m.title}`,'تأكد من وضع العمل أو اطلب تحديثًا من المسؤول؛ لا توجد موافقة تعطل التنفيذ.','MILESTONE',m.id,`/workspace/projects/${project.id}`);
-    await db.from('notification_log').insert({channel:'SYSTEM',recipient:assigned,event_type:tag,entity_type:'MILESTONE',entity_id:m.id,status:'SENT'});
-   }else if(nowMs-new Date(sent![0].created_at).getTime()>48*3600000&&assigned!==project.secretary_id&&project.secretary_id){
-    await inboxNotify(db,project.secretary_id,`DELEGATE_REVIEW_OVERDUE_${k+1}`,`مراجعة مفوضة لم تُوثق: ${m.title}`,'راجع مع المتابع المباشر حالة المحطة دون التدخل في التنفيذ.','MILESTONE',m.id,`/workspace/projects/${project.id}`);
-   }
-  }
+  // v5.7: no parallel legacy checkpoint alerts. Version-bound delegated review requests
+  // below are the single source of truth for supervisor accountability.
   if(late)await queueSystemNotice(db,'MILESTONE_OVERDUE','MILESTONE',m.id);
  }
- // Secretary accountability: a logged reminder is not a resolved review. Notify only if a delegated update
- // is still missing an evaluation; once the secretary records a follow-up, its due time is monitored.
+ // Delegated evaluation: actionable reminders only, not noise for every historical edit.
  const {data:delegations}=await db.from('project_supervision_assignments').select('initiative_id,supervisor_id,assigned_at');
  for(const delegation of delegations||[]){
-  const project=(await db.from('initiatives').select('id,title,secretary_id,status,lifecycle_state').eq('id',delegation.initiative_id).maybeSingle()).data;
-  if(!project||!project.secretary_id||project.secretary_id===delegation.supervisor_id||['COMPLETED','CANCELLED'].includes(project.status)||project.lifecycle_state==='POSTPONED')continue;
-  const recent=(await db.from('project_activity_entries').select('id,milestone_id,created_at').eq('initiative_id',project.id).eq('kind','MILESTONE_UPDATE').gte('created_at',new Date(nowMs-30*86400000).toISOString()).order('created_at',{ascending:false}).limit(35)).data||[];
-  for(const update of recent){
+  const projectQ=await db.from('initiatives').select('id,title,secretary_id,status,lifecycle_state,approval_status').eq('id',delegation.initiative_id).maybeSingle();
+  const project=projectQ.data;
+  if(!project||!project.secretary_id||project.secretary_id===delegation.supervisor_id||project.approval_status!=='APPROVED'||['COMPLETED','CANCELLED'].includes(project.status)||project.lifecycle_state==='POSTPONED')continue;
+  // Only latest update per milestone. Otherwise stale revisions generate false alarms.
+  const recentQ=await db.from('project_activity_entries').select('id,milestone_id,created_at,note').eq('initiative_id',project.id).eq('kind','MILESTONE_UPDATE').gte('created_at',new Date(nowMs-30*86400000).toISOString()).order('created_at',{ascending:false}).limit(100);
+  if(recentQ.error){console.error('delegated updates',recentQ.error);continue;}
+  const seen=new Set<string>();
+  for(const update of recentQ.data||[]){
+   if(seen.has(update.milestone_id))continue;seen.add(update.milestone_id);
    if(nowMs-new Date(update.created_at).getTime()<48*3600000||(delegation.assigned_at&&new Date(update.created_at)<new Date(delegation.assigned_at)))continue;
-   const reviewed=(await db.from('milestone_supervision_events').select('id').eq('source_activity_id',update.id).eq('actor_id',delegation.supervisor_id).in('event_type',['PROGRESS_OK','PROGRESS_FOLLOW_UP','RESULT_OK','RESULT_REVISION']).limit(1).maybeSingle()).data;
-   if(reviewed)continue;
-   const follow=(await db.from('project_supervision_followups').select('id,followup_due_at').eq('source_activity_id',update.id).eq('secretary_id',project.secretary_id).order('created_at',{ascending:false}).limit(1).maybeSingle()).data;
-   const actionable=follow&&new Date(follow.followup_due_at).getTime()<=nowMs;
-   if(!follow||actionable){
-    await inboxNotify(db,project.secretary_id,actionable?'DELEGATE_FOLLOWUP_DUE':'DELEGATE_REVIEW_GAP',`مشروع ${project.title}: متابعة النائب لم تُحسم`,actionable?'انتهت مهلة الإجراء الذي سجلته؛ المطلوب منك مراجعة نتيجته.':'تحديث مرّ عليه 48 ساعة دون تقييم من المتابع المفوض؛ المطلوب استيضاح الأمر عند الحاجة.','ACTIVITY',update.id,`/workspace/projects?tab=supervision`);
+   const reviewQ=await db.from('milestone_supervision_events').select('id').eq('source_activity_id',update.id).eq('actor_id',delegation.supervisor_id).in('event_type',['PROGRESS_OK','PROGRESS_FOLLOW_UP','RESULT_OK','RESULT_REVISION']).limit(1);
+   if(reviewQ.error){console.error('delegated review',reviewQ.error);continue;}if(reviewQ.data?.length)continue;
+   const requestsQ=await db.from('project_supervision_followups').select('review_request_attempt,followup_due_at').eq('source_activity_id',update.id).eq('delegated_supervisor_id',delegation.supervisor_id).not('review_request_attempt','is',null).order('review_request_attempt',{ascending:false});
+   if(requestsQ.error){console.error('delegated requests',requestsQ.error);continue;}
+   const reqs=requestsQ.data||[];
+   if(reqs.length===0){
+    await inboxNotify(db,project.secretary_id,'DELEGATED_REVIEW_REQUEST_FIRST',`مشروع ${project.title}: تقييم النائب متأخر`, 'مرّت 48 ساعة على تحديث دون تقييم؛ المطلوب إرسال طلب تقييم أول للنائب.','ACTIVITY',update.id,'/workspace/projects?tab=supervision');
+   }else if(nowMs>=new Date(reqs[0].followup_due_at).getTime()){
+    if(reqs.length===1){
+     await inboxNotify(db,project.secretary_id,'DELEGATED_REVIEW_REQUEST_SECOND',`مشروع ${project.title}: الطلب الأول دون استجابة`,'انقضت 24 ساعة على طلب التقييم الأول؛ المطلوب إرسال طلب تقييم ثانٍ للنائب لنفس التحديث.','ACTIVITY',update.id,'/workspace/projects?tab=supervision');
+    }else{
+     await inboxNotify(db,project.secretary_id,'DELEGATED_REVIEW_ESCALATION',`مشروع ${project.title}: طلبا التقييم بلا استجابة`,'لا ترسل طلبًا ثالثًا تلقائيًا؛ راجع سبب عدم الاستجابة وتدخل أو غيّر المتابع عند الحاجة.','ACTIVITY',update.id,'/workspace/projects?tab=supervision');
+    }
    }
   }
  }

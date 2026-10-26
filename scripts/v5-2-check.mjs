@@ -14,7 +14,7 @@ const checks=[
  ['Activity records actor timestamp and classification',wf.includes('author_id:profile.id')&&wf.includes('update_type:updateType')],
  ['No progress update cannot imply real progress in monitoring',mon.includes("['PROGRESS','COMPLETE']")],
  ['Result quality review is not an execution gate',wf.includes('MILESTONE_QUALITY_REVIEW')&&wf.includes('RESULT_OK')&&ui.includes('النتيجة مناسبة')],
- ['Supervisor periodic progress check logged',wf.includes('MILESTONE_PROGRESS_REVIEW')&&mon.includes('MILESTONE_SUPERVISOR_REVIEW_')],
+ ['Supervisor periodic progress check logged',wf.includes('MILESTONE_PROGRESS_REVIEW')&&mon.includes('DELEGATED_REVIEW_REQUEST_FIRST')],
  ['One unanswered request per milestone',wf.includes('هناك طلب تحديث مفتوح')&&wf.includes('REQUEST_ANSWERED')],
  ['Automatic milestone reminders are duration-based not daily',mon.includes('span<=3*86400000')&&mon.includes('span<=14*86400000')&&!mon.includes('PROJECT_UPDATE_OVERDUE')],
  ['Escalation for unanswered requests waits 48h',mon.includes('nowMs-48*3600000')],

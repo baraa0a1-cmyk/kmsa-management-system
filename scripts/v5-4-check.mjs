@@ -27,7 +27,7 @@ const checks=[
  ['Info icon shows exact time and opens milestone log',ui.includes('formatDateTime(lastShownTime)')&&ui.includes('عرض سجل المحطة')],
  ['Project history button remains visible',ui.includes('سجل المشروع الكامل')&&ui.includes("modal==='project-log'")],
  ['Real saving feedback and real workflow action',ui.includes('جارٍ تنفيذ طلبك')&&ui.includes('await workflow(action,payload)')&&!ui.includes('fakeSave')],
- ['Database mutation success separate from refresh failure',ui.includes('تم تنفيذ الإجراء بنجاح لكن تعذر تحديث العرض')],
+ ['Database mutation success separate from refresh failure',ui.includes('تم حفظ الإجراء، لكن تعذر تحديث العرض')],
  ['Update request is routed to actual backend action',ui.includes("act('MILESTONE_UPDATE_REQUEST'")&&wf.includes("kind==='UPDATE_REQUEST'")],
  ['Notification RPC uses installed actual function',api.includes("supabase.rpc('user_notification_feed'")],
  ['Notification failures are not silently converted into an empty inbox',api.includes('if(!missing)throw error')&&shell.includes("setError(e?.message||'تعذر جلب الإشعارات')")],
