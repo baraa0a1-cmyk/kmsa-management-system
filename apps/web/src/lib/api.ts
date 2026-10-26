@@ -35,7 +35,16 @@ export async function proposalHistory(id:string) {
 }
 export async function workflow(action:string, payload:any={}) {
   const { data, error } = await supabase.functions.invoke('workflow',{body:{action,payload}});
-  if (error) throw error; if (data?.error) throw new Error(data.error); return data;
+  if (error) {
+    // Supabase FunctionsHttpError contains the server response in context.
+    const response=(error as any).context;
+    if(response && typeof response.json==='function') {
+      try {const details=await response.clone().json();if(details?.error)throw new Error(String(details.error));}
+      catch(e) {if(e instanceof Error && e.message!==error.message && e.name==='Error')throw e;}
+    }
+    throw error;
+  }
+  if (data?.error) throw new Error(data.error); return data;
 }
 export async function plans(): Promise<Plan[]> {
   const { data, error } = await supabase.from('plans').select('*').order('created_at',{ascending:false}); if(error) throw error; return data||[];

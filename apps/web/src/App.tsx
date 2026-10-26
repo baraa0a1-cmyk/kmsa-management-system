@@ -68,7 +68,7 @@ export default function App(){return <AuthProvider><Routes>
   <Route path="/workspace/governance" element={<OversightOnly><GovernancePage/></OversightOnly>}/>
   <Route path="/workspace/performance" element={<OversightOnly><PerformancePage/></OversightOnly>}/>
   <Route path="/workspace/admin" element={<AdminOnly><AdminPage/></AdminOnly>}/>
-  <Route path="/workspace/users" element={<AdminOnly><UsersPage/></AdminOnly>}/>
+  <Route path="/workspace/users" element={<AdminOnly><Navigate to="/workspace/admin?tab=accounts" replace/></AdminOnly>}/>
  </Route>
  <Route path="*" element={<Navigate to="/" replace/>}/>
  </Routes></AuthProvider>}

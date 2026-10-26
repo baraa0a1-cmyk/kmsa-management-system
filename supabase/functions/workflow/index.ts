@@ -15,8 +15,13 @@ function formToProposal(form:any){return {
  success_criterion:form.successCriterion||null, context_factors:form.contextFactors||null, funding_needed:form.fundingNeeded||'UNKNOWN',
  funding_dependence:form.fundingDependence||'UNKNOWN', estimated_cost:form.estimatedCost||null, funding_source:form.fundingSource||null
 }}
-async function getProposal(db:any,id:string){const {data,error}=await db.from('proposals').select('*').eq('id',id).single();if(error)throw error;return data}
-async function getMilestone(db:any,id:string){const {data,error}=await db.from('milestones').select('*').eq('id',id).single();if(error)throw error;return data}
+async function getProposal(db:any,id:string){const {data,error}=await db.from('proposals').select('*').eq('id',id).single();if(error)throw error;const current=(await db.from('cycles').select('id').eq('is_current',true).single()).data?.id;if(!current||data.cycle_id!==current)throw new Error('هذا المقترح من دورة مؤرشفة.');return data}
+async function getMilestone(db:any,id:string){const {data,error}=await db.from('milestones').select('*').eq('id',id).single();if(error)throw error;
+ const r=await db.from('results').select('initiative_id').eq('id',data.result_id).single();if(r.error)throw r.error;
+ const owner=await db.from('initiatives').select('cycle_id').eq('id',r.data.initiative_id).single();if(owner.error)throw owner.error;
+ const active=(await db.from('cycles').select('id').eq('is_current',true).single()).data?.id;
+ if(!active||owner.data.cycle_id!==active)throw new Error('محطة من دورة مؤرشفة؛ لا يمكن تعديلها.');
+ return data}
 async function action(db:any,p:any,profile:any,type:string,toStatus?:string,note?:string,meta:any={}){
  const before=p.status; const patch:any={}; if(toStatus)patch.status=toStatus;
  if(toStatus==='WITH_SECRETARY'||toStatus==='REVISED')patch.secretary_due_at=hoursFromNow(Number(await setting(db,'secretary_sla_hours',48)));
@@ -56,9 +61,9 @@ async function queueNotice(db:any,event:string,entityType:string,entityId:string
  }
  if(entityType==='INITIATIVE'&&event==='PROJECT_PENDING_GS'){const init=(await db.from('initiatives').select('id,title').eq('id',entityId).maybeSingle()).data;const gsIds=((await db.from('profiles').select('id').eq('role','GS').eq('active',true)).data||[]).map((x:any)=>x.id);for(const id of gsIds)await inboxNotify(db,id,event,`قرار تكليف بانتظار الاعتماد: ${init?.title||'مشروع'}`,null,'INITIATIVE',entityId,`/workspace/projects/${entityId}`)}
 }
-async function getInitiative(db:any,id:string){const {data,error}=await db.from('initiatives').select('*').eq('id',id).single();if(error)throw error;return data}
-async function getResult(db:any,id:string){const {data,error}=await db.from('results').select('*,initiative:initiatives(*)').eq('id',id).single();if(error)throw error;return data}
-function canSuperviseProject(profile:any,initiative:any){return profile.role==='ADMIN'||initiative.secretary_id===profile.id||(profile.role==='SECRETARY'&&profile.secretariat_id===initiative.secretariat_id)}
+async function getInitiative(db:any,id:string){const {data,error}=await db.from('initiatives').select('*').eq('id',id).single();if(error)throw error;const current=(await db.from('cycles').select('id').eq('is_current',true).single()).data?.id;if(!current||data.cycle_id!==current)throw new Error('هذا المشروع يتبع دورة مؤرشفة ولا يمكن تعديله.');return data}
+async function getResult(db:any,id:string){const {data,error}=await db.from('results').select('*,initiative:initiatives(*)').eq('id',id).single();if(error)throw error;const active=(await db.from('cycles').select('id').eq('is_current',true).single()).data?.id;if(!active||data?.initiative?.cycle_id!==active)throw new Error('هذا العمل تابع لدورة سابقة، وهو محفوظ للعرض فقط.');return data}
+function canSuperviseProject(profile:any,initiative:any){return initiative.secretary_id===profile.id||(profile.role==='SECRETARY'&&profile.secretariat_id===initiative.secretariat_id)}
 function isProjectLead(profile:any,initiative:any,result?:any){return initiative.owner_id===profile.id||result?.owner_id===profile.id}
 
 async function computedProjectHealth(db:any,initiativeId:string){
@@ -166,7 +171,115 @@ Deno.serve(async(req)=>{
  try{
   const {profile,db}=await requestUser(req); const body=await req.json(); const actionName=String(body.action||''); const payload=body.payload||{};
   if(!actionName)return json({error:'Missing action'},400);
+  if(profile.role==='ADMIN' && !(/^(ADMIN_CYCLE_|ADMIN_BATCH_IMPORT$|ADMIN_RESET_PASSWORD$|ADMIN_SETTINGS_UPDATE$|NOTIFICATION_)/.test(actionName)||actionName==='PASSWORD_CHANGED'))throw new Error('مدير النظام يدير الدورات والحسابات فقط، ولا يدير أعمال السكرتاريات.');
 
+
+  // v5.8: Permanent system administration is strictly distinct from organizational office.
+  if(actionName.startsWith('ADMIN_CYCLE_')||actionName==='ADMIN_BATCH_IMPORT'||actionName==='ADMIN_RESET_PASSWORD'){
+   if(profile.role!=='ADMIN')throw new Error('مدير النظام فقط يستطيع تنفيذ هذا الإجراء.');
+  }
+  if(actionName==='ADMIN_CYCLE_CREATE'){
+   const code=String(payload.code||'').trim();const name=String(payload.name||'').trim();
+   if(!/^[a-zA-Z0-9_-]{2,32}$/.test(code)||name.length<3||name.length>120)throw new Error('حدد رمز دورة صالحًا واسمًا واضحًا.');
+   const numbers=[...new Set((payload.batches||[]).map((v:any)=>Number(v)))];
+   if(!numbers.length||numbers.length>30||numbers.some((v:any)=>!Number.isInteger(v)||v<1||v>999))throw new Error('اختر الدفعات المشمولة بصورة صحيحة.');
+   const c=await db.from('cycles').insert({code,name,status:'DRAFT',is_current:false,cycle_start_date:payload.startDate||null}).select().single();
+   if(c.error)throw c.error;
+   const b=await db.from('cycle_batches').insert(numbers.map((n:any)=>({cycle_id:c.data.id,batch_number:n})));if(b.error)throw b.error;
+   await audit(db,profile,'ADMIN_CYCLE_CREATE','CYCLE',c.data.id,null,{code,name,batches:numbers});
+   return json({ok:true,cycle:c.data});
+  }
+  if(actionName==='ADMIN_CYCLE_BATCH_ADD'){
+   const cycleId=String(payload.cycleId||'');const batch=Number(payload.batch);
+   if(!Number.isInteger(batch)||batch<1||batch>999)throw new Error('رقم الدفعة غير صالح.');
+   const cycle=(await db.from('cycles').select('id,status').eq('id',cycleId).single()).data;
+   if(!cycle||cycle.status==='CLOSED')throw new Error('لا يمكن تعديل دفعات دورة مؤرشفة.');
+   const r=await db.from('cycle_batches').upsert({cycle_id:cycleId,batch_number:batch},{onConflict:'cycle_id,batch_number'});if(r.error)throw r.error;
+   await audit(db,profile,'ADMIN_CYCLE_BATCH_ADD','CYCLE',cycleId,null,{batch});return json({ok:true});
+  }
+  if(actionName==='ADMIN_CYCLE_LEADER_SET'){
+   const cycleId=String(payload.cycleId||'');const memberId=String(payload.profileId||'');
+   const role=String(payload.role||'');const sid=role==='SECRETARY'?String(payload.secretariatId||''):null;
+   if(!['SECRETARY','GS','PRESIDENT'].includes(role))throw new Error('هذه الواجهة لتعيين الرئيس والسكرتارين فقط.');
+   if(role==='SECRETARY'&&!sid)throw new Error('حدد السكرتارية.');
+   const cycle=(await db.from('cycles').select('*').eq('id',cycleId).single()).data;
+   if(!cycle||cycle.is_current||cycle.status!=='DRAFT')throw new Error('تعيين القيادة يكون في دورة قيد التهيئة فقط.');
+   const member=(await db.from('profiles').select('id,role').eq('id',memberId).eq('active',true).single()).data;
+   if(!member||member.role==='ADMIN')throw new Error('اختر حساب عضو صالحًا، وليس حساب مدير النظام.');
+   // One leader per secretariat / central role. Replace in the draft, never silently add a second leader.
+   if(sid){const prior=(await db.from('cycle_memberships').select('profile_id').eq('cycle_id',cycleId).eq('role','SECRETARY').eq('secretariat_id',sid).is('ended_at',null)).data||[];
+     for(const x of prior)if(x.profile_id!==memberId){const r=await db.from('cycle_memberships').update({role:'MEMBER',secretariat_id:null}).eq('cycle_id',cycleId).eq('profile_id',x.profile_id);if(r.error)throw r.error;}
+   }else{const prior=(await db.from('cycle_memberships').select('profile_id').eq('cycle_id',cycleId).eq('role',role).is('ended_at',null)).data||[];
+     for(const x of prior)if(x.profile_id!==memberId){const r=await db.from('cycle_memberships').update({role:'MEMBER',secretariat_id:null}).eq('cycle_id',cycleId).eq('profile_id',x.profile_id);if(r.error)throw r.error;}
+   }
+   const r=await db.from('cycle_memberships').upsert({cycle_id:cycleId,profile_id:memberId,role,secretariat_id:sid,ended_at:null},{onConflict:'cycle_id,profile_id'}).select().single();if(r.error)throw r.error;
+   await audit(db,profile,'ADMIN_CYCLE_LEADER_SET','CYCLE',cycleId,null,{profile_id:memberId,role,secretariat_id:sid});
+   return json({ok:true,membership:r.data});
+  }
+  if(actionName==='ADMIN_CYCLE_ACTIVATE'){
+   const cycleId=String(payload.cycleId||'');if(!cycleId)throw new Error('اختر الدورة.');
+   // Pass caller JWT to a restricted SECURITY DEFINER transaction, never mutate cycles row-by-row.
+   const authHeader=req.headers.get('Authorization')||'';
+   const {createClient}=await import('npm:@supabase/supabase-js@2');
+   const caller=createClient(Deno.env.get('SUPABASE_URL')!,Deno.env.get('SUPABASE_ANON_KEY')!,{global:{headers:{Authorization:authHeader}},auth:{persistSession:false}});
+   const act=await caller.rpc('activate_kmsa_cycle',{p_cycle_id:cycleId});if(act.error)throw act.error;
+   await audit(db,profile,'ADMIN_CYCLE_ACTIVATE','CYCLE',cycleId,null,{cycle_id:cycleId});
+   return json({ok:true});
+  }
+  if(actionName==='ADMIN_BATCH_IMPORT'){
+   const cycleId=String(payload.cycleId||'');const batch=Number(payload.batch);
+   const cycle=(await db.from('cycles').select('id').eq('id',cycleId).single()).data;
+   const selected=(await db.from('cycle_batches').select('cycle_id').eq('cycle_id',cycleId).eq('batch_number',batch).maybeSingle()).data;
+   if(!cycle||!selected)throw new Error('الدفعة غير مدرجة في الدورة المحددة.');
+   const entries=payload.people;
+   if(!Array.isArray(entries)||!entries.length||entries.length>100)throw new Error('أرسل دفعة استيراد من 1 إلى 100 شخص.');
+   const initial=String(payload.initialPassword||'');
+   if(initial.length<12||initial.length>128)throw new Error('كلمة المرور الأولية يجب أن تكون 12 حرفًا على الأقل.');
+   const seenEmails=new Set<string>(),seenIds=new Set<string>();const results:any[]=[];
+   for(let i=0;i<entries.length;i++){
+    const raw=entries[i]||{};const email=String(raw.email||'').trim().toLowerCase();const name=String(raw.name||'').trim();const uid=String(raw.universityId||'').trim();
+    const validEmail=/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    if(!validEmail||name.length<5||!uid||uid.length>80||seenEmails.has(email)||seenIds.has(uid)){
+      results.push({row:i+1,universityId:uid,status:'INVALID',reason:'بيانات ناقصة أو مكررة في هذه المجموعة'});continue;
+    }
+    seenEmails.add(email);seenIds.add(uid);
+    try{
+     const byEmail=await db.from('profiles').select('id,university_id,batch_number').eq('email',email).limit(1);
+     const byUid=await db.from('profiles').select('id,email,batch_number').eq('university_id',uid).limit(1);
+     if(byEmail.error||byUid.error)throw byEmail.error||byUid.error;
+     const existingEmail=byEmail.data?.[0],existingUid=byUid.data?.[0];
+     if(existingEmail||existingUid){
+       if(!existingEmail||!existingUid||existingEmail.id!==existingUid.id||(existingEmail.batch_number&&existingEmail.batch_number!==batch)){results.push({row:i+1,universityId:uid,status:'INVALID',reason:'البريد أو الرقم الجامعي مستخدم لحساب مختلف، يحتاج مراجعة'});continue;}
+       if(!existingEmail.batch_number){const patch=await db.from('profiles').update({batch_number:batch}).eq('id',existingEmail.id);if(patch.error)throw patch.error;}
+       const mem=await db.from('cycle_memberships').upsert({cycle_id:cycleId,profile_id:existingEmail.id,role:'MEMBER'},{onConflict:'cycle_id,profile_id',ignoreDuplicates:true});
+       if(mem.error)throw mem.error;
+       results.push({row:i+1,universityId:uid,status:'EXISTS',reason:'الحساب موجود، أُدرج بالدورة دون تغيير كلمة مروره'});continue;
+     }
+     const made=await db.auth.admin.createUser({email,password:initial,email_confirm:true,user_metadata:{full_name:name,must_change_password:true}});
+     if(made.error||!made.data.user)throw made.error||new Error('تعذر إنشاء حساب الدخول');
+     const authId=made.data.user.id;
+     const prof=await db.from('profiles').insert({auth_user_id:authId,university_id:uid,batch_number:batch,email,full_name:name,role:'MEMBER',active:true,must_change_password:true}).select('id').single();
+     if(prof.error){await db.auth.admin.deleteUser(authId);throw prof.error;}
+     const contacts=raw.contacts||{};const safe=(v:any)=>String(v||'').trim().slice(0,140)||null;
+     const contact=await db.from('member_contact_details').insert({profile_id:prof.data.id,phone:safe(contacts.phone),whatsapp:safe(contacts.whatsapp),telegram_handle:safe(contacts.telegram),department:safe(contacts.department),current_location:safe(contacts.location),country:safe(contacts.country),city:safe(contacts.city)});
+     if(contact.error)throw contact.error;
+     const mem=await db.from('cycle_memberships').upsert({cycle_id:cycleId,profile_id:prof.data.id,role:'MEMBER'},{onConflict:'cycle_id,profile_id'});
+     if(mem.error)throw mem.error;
+     results.push({row:i+1,universityId:uid,status:'CREATED'});
+    }catch(e:any){results.push({row:i+1,universityId:uid,status:'ERROR',reason:String(e.message||'تعذر الإنشاء').slice(0,140)});}
+   }
+   await audit(db,profile,'ADMIN_BATCH_IMPORT','CYCLE',cycleId,null,{batch,created:results.filter(x=>x.status==='CREATED').length,total:entries.length});
+   return json({ok:true,results});
+  }
+  if(actionName==='ADMIN_RESET_PASSWORD'){
+   const id=String(payload.profileId||'');const target=(await db.from('profiles').select('id,auth_user_id,email').eq('id',id).eq('active',true).single()).data;
+   if(!target)throw new Error('الحساب غير موجود.');
+   const bytes=crypto.getRandomValues(new Uint8Array(24));const temporary=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+   const reset=await db.auth.admin.updateUserById(target.auth_user_id,{password:temporary,user_metadata:{must_change_password:true}});if(reset.error)throw reset.error;
+   const flag=await db.from('profiles').update({must_change_password:true}).eq('id',id);if(flag.error)throw flag.error;
+   await audit(db,profile,'ADMIN_RESET_PASSWORD','PROFILE',id,null,{reset_at:new Date().toISOString()});
+   return json({ok:true,temporaryPassword:temporary}); // Shown exactly once, never stored in application tables.
+  }
   if(actionName==='PROPOSAL_CREATE'){
    const values=formToProposal(payload.form||{}); if(!values.title||!values.secretariat_id)throw new Error('بيانات المقترح الأساسية ناقصة.');
    const cycle=(await db.from('cycles').select('*').eq('is_current',true).single()).data; if(!cycle)throw new Error('لا توجد دورة حالية.');
@@ -563,7 +676,7 @@ Deno.serve(async(req)=>{
     }
    }
    if(status==='READY_FOR_VERIFICATION'&&m.status==='READY_FOR_VERIFICATION'&&nextOutcome!==m.outcome_text)await syncProjectCompletion(db,m.result_id);
-   if(['AT_RISK','BLOCKED','READY_FOR_VERIFICATION'].includes(status))await queueNotice(db,status==='READY_FOR_VERIFICATION'?'MILESTONE_READY':'PROJECT_NEEDS_ATTENTION','MILESTONE',m.id,{status});return json({ok:true,milestone:u.data,warning:!reviewerNotified?'حُفظ التحديث لكن تعذر إرسال الإشعار للمشرف. تأكد من صندوق الإشعارات أو أخبر المتابع مباشرة.':null});
+   if(['AT_RISK','BLOCKED','READY_FOR_VERIFICATION'].includes(status)){try{await queueNotice(db,status==='READY_FOR_VERIFICATION'?'MILESTONE_READY':'PROJECT_NEEDS_ATTENTION','MILESTONE',m.id,{status})}catch(e){reviewerNotified=false;console.error('Nonfatal notification failure',e)}}return json({ok:true,milestone:u.data,warning:!reviewerNotified?'حُفظ التحديث لكن تعذر إرسال الإشعار للمشرف. تأكد من صندوق الإشعارات أو أخبر المتابع مباشرة.':null});
   }
   if(actionName==='MILESTONE_SECRETARY_NOTE'){
    const m=await getMilestone(db,payload.milestoneId);const result=await getResult(db,m.result_id);const init=result.initiative;if(!await canFollowProject(db,profile,init))throw new Error('المتابع المباشر فقط يضيف ملاحظته.');if(init.approval_status!=='APPROVED'||init.setup_status!=='ACTIVE')throw new Error('لا تضاف ملاحظات تنفيذية قبل اعتماد المشروع.');const u=await db.from('milestones').update({secretary_note:payload.note||null}).eq('id',m.id).select().single();if(u.error)throw u.error;await audit(db,profile,'MILESTONE_SECRETARY_NOTE','MILESTONE',m.id,m,u.data);if(String(payload.note||'').trim()){const entry=await db.from('project_activity_entries').insert({initiative_id:init.id,milestone_id:m.id,author_id:profile.id,kind:'SECRETARY_NOTE',note:String(payload.note).trim()});if(entry.error)throw entry.error;}return json({ok:true,milestone:u.data});
@@ -699,7 +812,8 @@ Deno.serve(async(req)=>{
   if(actionName==='POSITION_CREATE'){
    if(!['SECRETARY','ADMIN'].includes(profile.role))throw new Error('السكرتير المختص فقط ينشئ صفة تشغيلية.');
    const sid=profile.role==='ADMIN'?payload.secretariatId:profile.secretariat_id;if(!sid)throw new Error('حدد السكرتارية.');const title=String(payload.title||'').trim();if(!title)throw new Error('اكتب اسم الصفة.');
-   const r=await db.from('operational_positions').insert({secretariat_id:sid,title,description:payload.description||null,created_by:profile.id}).select().single();if(r.error)throw r.error;await audit(db,profile,'POSITION_CREATE','POSITION',r.data.id,null,r.data);return json({ok:true,position:r.data});
+   const cycleId=(await db.from('cycles').select('id').eq('is_current',true).single()).data?.id;if(!cycleId)throw new Error('لا توجد دورة حالية.');
+   const r=await db.from('operational_positions').insert({secretariat_id:sid,cycle_id:cycleId,title,description:payload.description||null,created_by:profile.id}).select().single();if(r.error)throw r.error;await audit(db,profile,'POSITION_CREATE','POSITION',r.data.id,null,r.data);return json({ok:true,position:r.data});
   }
   if(actionName==='POSITION_UPDATE'){
    const pos=(await db.from('operational_positions').select('*').eq('id',payload.positionId).single()).data;if(!pos||!(profile.role==='ADMIN'||(profile.role==='SECRETARY'&&profile.secretariat_id===pos.secretariat_id)))throw new Error('غير مسموح.');
@@ -709,15 +823,17 @@ Deno.serve(async(req)=>{
   }
   if(actionName==='POSITION_ASSIGN'){
    const pos=(await db.from('operational_positions').select('*').eq('id',payload.positionId).single()).data;if(!pos||!(profile.role==='ADMIN'||(profile.role==='SECRETARY'&&profile.secretariat_id===pos.secretariat_id)))throw new Error('غير مسموح.');
+   const currentId=(await db.from('cycles').select('id').eq('is_current',true).single()).data?.id;if(!currentId||pos.cycle_id!==currentId)throw new Error('لا يمكن تعديل تكليف في دورة سابقة.');
    const member=(await db.from('profiles').select('*').eq('id',payload.profileId).eq('active',true).single()).data;if(!member)throw new Error('اختر عضوًا فعّالًا.');
-   const a=await db.from('position_assignments').insert({position_id:pos.id,profile_id:member.id,scope_label:payload.scopeLabel||null,starts_at:payload.startsAt||new Date().toISOString(),created_by:profile.id}).select().single();if(a.error)throw a.error;
+   const membership=(await db.from('cycle_memberships').select('id').eq('cycle_id',currentId).eq('profile_id',member.id).is('ended_at',null).maybeSingle()).data;if(!membership)throw new Error('هذا الشخص غير مسجل ضمن الدورة الحالية.');
+   const a=await db.from('position_assignments').insert({position_id:pos.id,cycle_id:currentId,profile_id:member.id,scope_label:payload.scopeLabel||null,assignment_detail:String(payload.assignmentDetail||'').trim().slice(0,500)||null,starts_at:payload.startsAt||new Date().toISOString(),created_by:profile.id}).select().single();if(a.error)throw a.error;
    const secretaryId=profile.role==='SECRETARY'?profile.id:(await db.from('profiles').select('id').eq('role','SECRETARY').eq('secretariat_id',pos.secretariat_id).eq('active',true).limit(1).maybeSingle()).data?.id||null;
    const duties=(await db.from('position_duty_templates').select('*').eq('position_id',pos.id).eq('active',true)).data||[];for(const d of duties){const base=new Date();base.setUTCDate(base.getUTCDate()+Number(d.first_due_after_days||d.interval_days||7));await db.from('routine_obligations').insert({secretariat_id:pos.secretariat_id,secretary_id:secretaryId,owner_id:member.id,title:d.title,description:d.description,expected_output:d.expected_output,cadence:'CUSTOM',interval_days:d.interval_days,next_due_at:base.toISOString(),created_by:profile.id,source_type:'POSITION',position_assignment_id:a.data.id,duty_template_id:d.id});}
    const futureEvents=(await db.from('work_events').select('id').eq('position_id',pos.id).eq('status','SCHEDULED').gte('scheduled_at',new Date().toISOString())).data||[];for(const e of futureEvents)await db.from('event_attendance').upsert({event_id:e.id,profile_id:member.id,assignment_id:a.data.id},{onConflict:'event_id,profile_id'});
    await audit(db,profile,'POSITION_ASSIGN','POSITION_ASSIGNMENT',a.data.id,null,a.data);await inboxNotify(db,member.id,'POSITION_ASSIGNED',`تم إسناد صفة: ${pos.title}`,payload.scopeLabel?`النطاق: ${payload.scopeLabel}`:'ستظهر لك الالتزامات المرتبطة بهذه الصفة تلقائيًا.','POSITION',pos.id,'/workspace/routine');return json({ok:true,assignment:a.data});
   }
   if(actionName==='POSITION_ASSIGNMENT_END'){
-   const a=(await db.from('position_assignments').select('*,position:operational_positions(*)').eq('id',payload.assignmentId).single()).data;if(!a||!(profile.role==='ADMIN'||(profile.role==='SECRETARY'&&profile.secretariat_id===a.position.secretariat_id)))throw new Error('غير مسموح.');const u=await db.from('position_assignments').update({active:false,ends_at:payload.endsAt||new Date().toISOString()}).eq('id',a.id).select().single();if(u.error)throw u.error;await db.from('routine_obligations').update({active:false}).eq('position_assignment_id',a.id).eq('active',true);const futureEvents=(await db.from('work_events').select('id').eq('position_id',a.position_id).eq('status','SCHEDULED').gte('scheduled_at',new Date().toISOString())).data||[];const eventIds=futureEvents.map((x:any)=>x.id);if(eventIds.length)await db.from('event_attendance').delete().eq('assignment_id',a.id).eq('status','PENDING').in('event_id',eventIds);await audit(db,profile,'POSITION_ASSIGNMENT_END','POSITION_ASSIGNMENT',a.id,a,u.data);return json({ok:true});
+   const a=(await db.from('position_assignments').select('*,position:operational_positions(*)').eq('id',payload.assignmentId).single()).data;if(!a||!(profile.role==='ADMIN'||(profile.role==='SECRETARY'&&profile.secretariat_id===a.position.secretariat_id)))throw new Error('غير مسموح.');const currentId=(await db.from('cycles').select('id').eq('is_current',true).single()).data?.id;if(a.cycle_id!==currentId)throw new Error('لا يمكن إنهاء تكليف دورة سابقة.');const u=await db.from('position_assignments').update({active:false,ends_at:payload.endsAt||new Date().toISOString()}).eq('id',a.id).select().single();if(u.error)throw u.error;await db.from('routine_obligations').update({active:false}).eq('position_assignment_id',a.id).eq('active',true);const futureEvents=(await db.from('work_events').select('id').eq('position_id',a.position_id).eq('status','SCHEDULED').gte('scheduled_at',new Date().toISOString())).data||[];const eventIds=futureEvents.map((x:any)=>x.id);if(eventIds.length)await db.from('event_attendance').delete().eq('assignment_id',a.id).eq('status','PENDING').in('event_id',eventIds);await audit(db,profile,'POSITION_ASSIGNMENT_END','POSITION_ASSIGNMENT',a.id,a,u.data);return json({ok:true});
   }
   if(actionName==='POSITION_DUTY_CREATE'){
    const pos=(await db.from('operational_positions').select('*').eq('id',payload.positionId).single()).data;if(!pos||!(profile.role==='ADMIN'||(profile.role==='SECRETARY'&&profile.secretariat_id===pos.secretariat_id)))throw new Error('غير مسموح.');const title=String(payload.title||'').trim();if(!title)throw new Error('اكتب اسم الالتزام.');const interval=Math.max(1,Math.min(365,Number(payload.intervalDays||7)));const first=Math.max(0,Math.min(365,Number(payload.firstDueAfterDays??interval)));
@@ -780,13 +896,10 @@ Deno.serve(async(req)=>{
    const {error:authError}=await db.auth.admin.updateUserById(profile.auth_user_id,{password:newPassword});if(authError)throw authError;await db.from('profiles').update({must_change_password:false}).eq('id',profile.id);await audit(db,profile,'ACCOUNT_PASSWORD_CHANGE','PROFILE',profile.id,null,{changed:true});return json({ok:true});
   }
 
-  if(actionName==='PASSWORD_CHANGED'){await db.from('profiles').update({must_change_password:false}).eq('id',profile.id);await audit(db,profile,'PASSWORD_CHANGED','PROFILE',profile.id,null,{must_change_password:false});return json({ok:true});}
+  if(actionName==='PASSWORD_CHANGED')throw new Error('غيّر كلمة المرور باستخدام كلمتك الحالية أو المؤقتة للتأكد من هوية صاحب الحساب.');
 
-  if(actionName==='ADMIN_SETTINGS_UPDATE'){if(profile.role!=='ADMIN')throw new Error('غير مسموح.');for(const [key,value] of Object.entries(payload.settings||{})){await db.from('system_settings').upsert({key,value,updated_by:profile.id,updated_at:new Date().toISOString()})}await audit(db,profile,'ADMIN_SETTINGS_UPDATE','SYSTEM',null,null,payload.settings);return json({ok:true});}
-  if(actionName==='ADMIN_USER_ASSIGNMENT'){
-   if(profile.role!=='ADMIN')throw new Error('غير مسموح.');const role=String(payload.role||'APPLICANT');let secretariatId=payload.secretariatId||null;if(role==='SECRETARY'){if(!secretariatId)throw new Error('حدد السكرتارية لهذا السكرتير.');const other=(await db.from('profiles').select('id,full_name').eq('role','SECRETARY').eq('secretariat_id',secretariatId).eq('active',true).neq('id',payload.userId).limit(1).maybeSingle()).data;if(other)throw new Error(`يوجد سكرتير فعّال لهذه السكرتارية: ${other.full_name}`)}else secretariatId=null;const before=(await db.from('profiles').select('*').eq('id',payload.userId).single()).data;const r=await db.from('profiles').update({role,secretariat_id:secretariatId}).eq('id',payload.userId).select().single();if(r.error)throw r.error;await audit(db,profile,'ADMIN_USER_ASSIGNMENT','PROFILE',payload.userId,before,r.data);return json({ok:true,profile:r.data});
-  }
-  if(actionName==='ADMIN_USER_ROLE'){if(profile.role!=='ADMIN')throw new Error('غير مسموح.');const before=(await db.from('profiles').select('*').eq('id',payload.userId).single()).data;const r=await db.from('profiles').update({role:payload.role}).eq('id',payload.userId).select().single();if(r.error)throw r.error;await audit(db,profile,'ADMIN_USER_ROLE','PROFILE',payload.userId,before,r.data);return json({ok:true});}
+  if(actionName==='ADMIN_SETTINGS_UPDATE'){if(profile.role!=='ADMIN')throw new Error('غير مسموح.');for(const [key,value] of Object.entries(payload.settings||{})){if(key==='current_cycle')throw new Error('تغيير الدورة يتم من إدارة الدورات فقط.');await db.from('system_settings').upsert({key,value,updated_by:profile.id,updated_at:new Date().toISOString()})}await audit(db,profile,'ADMIN_SETTINGS_UPDATE','SYSTEM',null,null,payload.settings);return json({ok:true});}
+  if(actionName==='ADMIN_USER_ASSIGNMENT'||actionName==='ADMIN_USER_ROLE')throw new Error('المناصب القيادية تُعيَّن داخل تهيئة الدورة فقط.');
 
   if(actionName==='FILE_DOWNLOAD'||actionName==='TEMPLATE_DOWNLOAD'){
    const bridge=Deno.env.get('DRIVE_BRIDGE_URL');const secret=Deno.env.get('DRIVE_BRIDGE_SECRET');if(!bridge||!secret)throw new Error('Drive bridge not configured');

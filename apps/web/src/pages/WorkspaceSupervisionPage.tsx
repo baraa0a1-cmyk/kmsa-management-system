@@ -18,7 +18,7 @@ const HOUR=3600000;
 export default function WorkspaceSupervisionPage(){
  const {profile}=useAuth();
  const [rows,setRows]=useState<SupervisionRow[]>([]);const [reviewQueue,setReviewQueue]=useState<SupervisionRow[]>([]);
- const [filter,setFilter]=useState<'all'|'direct'|'delegated'>('all');
+ const [filter,setFilter]=useState<'all'|'direct'|'delegated'>('all');const [supervisorId,setSupervisorId]=useState('');
  const [busy,setBusy]=useState(true);const [pending,setPending]=useState<string|null>(null);
  const [error,setError]=useState('');const [notice,setNotice]=useState('');
  const [confirmation,setConfirmation]=useState<SupervisionRow|null>(null);
@@ -77,7 +77,7 @@ export default function WorkspaceSupervisionPage(){
  };
  const pendingRows=reviewQueue.filter(x=>due(x));
  const awaitingSecretary=pendingRows.filter(x=>!!actionFor(x));
- const visible=rows.filter(x=>filter==='all'||(filter==='delegated'?x.delegated:!x.delegated));
+ const visible=rows.filter(x=>(filter==='all'||(filter==='delegated'?x.delegated:!x.delegated))&&(!supervisorId||x.supervisorId===supervisorId));
  const currentRequest=confirmation?actionFor(confirmation):null;
  async function submitRequest(){
   if(!confirmation?.latest||!currentRequest||pending)return;
@@ -95,7 +95,7 @@ export default function WorkspaceSupervisionPage(){
   {notice&&<div className="v57-success" role="status"><CheckCircle2 size={18}/>{notice}</div>}
   <div className="v57-supervision-metrics"><div><Users size={17}/><b>{rows.length}</b><span>مشاريع تحت الإشراف</span></div><div><UserCheck size={17}/><b>{rows.filter(x=>x.delegated).length}</b><span>بإشراف مفوّض</span></div><div><AlertCircle size={17}/><b>{awaitingSecretary.length}</b><span>تحتاج إجراءً منك</span></div></div>
   <section className="workspace-card v57-supervision-panel">
-   <div className="v57-panel-head"><div><h2>المشاريع والمتابعون</h2><p>مراجعة النائب لا توقف تنفيذ المسؤول. التحديثات العادية لا تُعد إخفاقًا بمجرد أنها لم تُراجع فورًا.</p></div><div className="v57-filters"><button className={filter==='all'?'active':''} onClick={()=>setFilter('all')}>الكل</button><button className={filter==='direct'?'active':''} onClick={()=>setFilter('direct')}>إشرافي المباشر</button><button className={filter==='delegated'?'active':''} onClick={()=>setFilter('delegated')}>الإشراف المفوّض</button></div></div>
+   <div className="v57-panel-head"><div><h2>المشاريع والمتابعون</h2></div><div className="v57-filters"><button className={filter==='all'?'active':''} onClick={()=>setFilter('all')}>الكل</button><button className={filter==='direct'?'active':''} onClick={()=>setFilter('direct')}>إشرافي المباشر</button><button className={filter==='delegated'?'active':''} onClick={()=>setFilter('delegated')}>الإشراف المفوّض</button></div><select className="select compact-filter" aria-label="تصفية حسب المشرف" value={supervisorId} onChange={e=>setSupervisorId(e.target.value)}><option value="">جميع المشرفين</option>{Array.from(new Map(rows.map(r=>[r.supervisorId,r.supervisorName])).entries()).map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></div>
    {awaitingSecretary.length>0&&<section className="v57-action-queue" aria-label="طلبات تقييم تنتظر إجراء السكرتير"><h3>طلبات تقييم تستحق إجراءك <b className="v57-count-dot">{awaitingSecretary.length}</b></h3><p>كل طلب مرتبط بتحديث محطة بعينه، حتى لو كان للمشروع أكثر من محطة نشطة.</p>{awaitingSecretary.map(r=>{const req=actionFor(r);return <div key={r.latest!.id} className="v57-action-entry"><div><strong>{r.project.project_title}</strong><small>المتابع: {r.supervisorName} · {r.latest?.note||'تحديث المحطة'} · {formatDateTime(r.latest!.created_at)}</small></div>{req&&<button className="workspace-primary small" onClick={()=>setConfirmation(r)} disabled={!!pending}><Send size={14}/>{req.label}</button>}</div>})}</section>}
    {busy?<p className="workspace-empty">جارٍ تحميل المشاريع…</p>:visible.length===0?<p className="workspace-empty">لا توجد مشاريع مطابقة.</p>:<div className="v57-supervision-list">
     {visible.map(r=>{const action=actionFor(r);const expiredSecond=r.requests.length>=2&&Date.now()>=new Date(r.requests[r.requests.length-1].followup_due_at).getTime()&&!r.reviewed;return <article key={r.project.project_id} className="v57-supervision-row">
