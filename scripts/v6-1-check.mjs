@@ -22,7 +22,7 @@ const checks=[
  ['Two functional admin areas',page.includes('الأعضاء والدفعات')&&page.includes('الدورات والقيادة')],
  ['Batch creation does not require cycle',page.includes("'ADMIN_BATCH_CREATE'")],
  ['Batch detail opens from batch list',page.includes('setSelectedBatch(b.batch_number)')],
- ['People added inside a batch',page.includes('<KmsaSingleMember batch={batch.batch_number}')],
+ ['People added inside a batch',(page.includes('<KmsaSingleMember batch={batch.batch_number}')||page.includes('<KmsaSingleMember batch={batch!.batch_number}'))],
  ['CSV imported inside batch with explicit selection',page.includes('selectedRows.includes(x.row)')&&page.includes('KmsaImportReview')],
  ['Single import password for selected users',page.includes('initialPassword:pass')],
  ['No council membership workflow in administration',!page.includes('مجلس الرابطة')],

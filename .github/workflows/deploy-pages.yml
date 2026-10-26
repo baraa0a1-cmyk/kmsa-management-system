@@ -55,6 +55,8 @@ jobs:
         run: node ../../scripts/v6-1-check.mjs
       - name: Verify v6.2 office eligibility and CSV synchronization
         run: node ../../scripts/v6-2-check.mjs
+      - name: Verify v6.3 office role and unassigned cohort safeguards
+        run: node ../../scripts/v6-3-check.mjs
       - name: Build
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}

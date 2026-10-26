@@ -14,6 +14,7 @@ export function adminMessage(error:unknown):string{
   'EMAIL_IN_USE_BY_ANOTHER_MEMBER':'البريد الإلكتروني مرتبط بعضو آخر. يجب مراجعة التضارب.',
   'EMAIL_ALREADY_USED_BY_DIFFERENT_ID':'البريد الإلكتروني مرتبط برقم جامعي آخر.',
   'ADMIN_REQUIRED':'لا تملك صلاحية إجراء هذه العملية.',
+  'operator does not exist: app_role = text':'يوجد تعارض بين نوع المنصب والبيانات في قاعدة النظام. يُرجى التأكد من تطبيق ترقية إصلاح المناصب v6.3.',
   'CYCLE_LEADERSHIP_INCOMPLETE':'أضف الرئيس والسكرتير العام أولًا.',
   'JWT expired':'انتهت جلسة الدخول. سجّل الدخول مجددًا.'
  };
