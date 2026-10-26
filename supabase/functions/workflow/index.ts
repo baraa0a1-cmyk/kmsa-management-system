@@ -267,7 +267,7 @@ Deno.serve(async(req)=>{
    await audit(db,profile,'ADMIN_CYCLE_LEADER_SET','CYCLE',cycleId,null,{profile_id:memberId,role,secretariat_id:sid});
    return json({ok:true,membership:r.data});
   }
-  if(actionName==='ADMIN_CYCLE_ACTIVATE'){
+  if(actionName==='ADMIN_CYCLE_ACTIVATE'){ throw new Error('اعتماد الدورة متاح فقط من واجهة إدارة v6 الآمنة.');
    const cycleId=String(payload.cycleId||'');if(!cycleId)throw new Error('اختر الدورة.');
    // Pass caller JWT to a restricted SECURITY DEFINER transaction, never mutate cycles row-by-row.
    const authHeader=req.headers.get('Authorization')||'';
@@ -319,6 +319,8 @@ Deno.serve(async(req)=>{
    return json({ok:true,results});
   }
   if(actionName==='ADMIN_RESET_PASSWORD'){
+   const candidate=(await db.from('profiles').select('role').eq('id',String(payload.profileId||'')).maybeSingle()).data;
+   if(!candidate||candidate.role==='ADMIN')throw new Error('استعادة حساب المدير تتطلب إجراءً إداريًا خاصًا، وليس هذا النموذج.');
    const id=String(payload.profileId||'');const target=(await db.from('profiles').select('id,auth_user_id,email').eq('id',id).eq('active',true).single()).data;
    if(!target)throw new Error('الحساب غير موجود.');
    const bytes=crypto.getRandomValues(new Uint8Array(24));const temporary=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
