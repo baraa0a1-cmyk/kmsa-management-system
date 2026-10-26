@@ -35,7 +35,7 @@ const checks=[
  ['Batch detail supports CSV',page.includes('function readCsv(')&&page.includes('استيراد CSV')],
  ['Batch list not linked to cycle',page.includes('function BatchArea(')&&page.includes('setSelectedBatch(')],
  ['No move reason requested',!page.includes('سبب النقل')],
- ['Import progress is visible',page.includes('setProgress(')&&page.includes('جارٍ الاستيراد')],
+ ['Import progress is visible',page.includes('setProgress(')&&page.includes('جارٍ التنفيذ')],
  ['CSS dedicated administration shell',css.includes('.v59-admin-shell')&&css.includes('.v59-list-row')],
  ['Admin does not render member notifications',shell.includes("if(profile?.role==='ADMIN')return <AdminShell/>")],
  ['Admin actions blocked from project operations',wf.includes('مدير النظام يدير الدورات والحسابات فقط')],

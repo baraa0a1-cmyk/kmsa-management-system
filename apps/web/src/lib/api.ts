@@ -36,16 +36,20 @@ export async function proposalHistory(id:string) {
 export async function workflow(action:string, payload:any={}) {
   const { data, error } = await supabase.functions.invoke('workflow',{body:{action,payload}});
   if (error) {
-    // Supabase FunctionsHttpError contains the server response in context.
     const response=(error as any).context;
-    if(response && typeof response.json==='function') {
-      try {const details=await response.clone().json();if(details?.error)throw new Error(String(details.error));}
-      catch(e) {if(e instanceof Error && e.message!==error.message && e.name==='Error')throw e;}
+    if(response && typeof response.clone==='function'){
+      let details:any=null;
+      try{details=await response.clone().json()}catch{/* Response may be non-JSON, e.g. gateway unavailable. */}
+      const raw=details?.error??details?.message??details?.details;
+      const reason=typeof raw==='string'?raw:raw&&typeof raw.message==='string'?raw.message:null;
+      if(reason)throw new Error(reason);
     }
-    throw error;
+    throw new Error(error.message||'تعذر الاتصال بالخادم. يرجى إعادة المحاولة.');
   }
-  if (data?.error) throw new Error(data.error); return data;
+  if(data?.error){const reason=typeof data.error==='string'?data.error:data.error?.message||'تعذر تنفيذ العملية.';throw new Error(reason)}
+  return data;
 }
+
 export async function plans(): Promise<Plan[]> {
   const { data, error } = await supabase.from('plans').select('*').order('created_at',{ascending:false}); if(error) throw error; return data||[];
 }

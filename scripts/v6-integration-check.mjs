@@ -10,7 +10,7 @@ const tests=[
  ['Safe cycle-switch UI in place',admin.includes('kmsa_switch_current_cycle')&&admin.includes('kmsa_cycle_preview')],
  ['No browser-native confirmation calls',!admin.includes('window.confirm(')],
  ['All CSV row selection is supported',admin.includes('selectedRows')&&imp.includes('displayed.slice(page*25')],
- ['Every selected row needs confirmed server validation',imp.includes("if(!checked)return 'checking'")&&imp.includes("checked.status==='READY'?'ready':'review'")],
+ ['Every selected row needs confirmed server validation',imp.includes("if(!status||checking||warning)return 'checking'")&&imp.includes("status==='READY'?'ready'")],
  ['Selected CSV with same filename triggers fresh validation',admin.includes('fileRevision')&&admin.includes('setFileRevision(x=>x+1)')],
  ['Backend duplicate IDs checked',workflow.includes(".eq('university_id',uid)")],
  ['Old unsafe activation endpoint disabled',workflow.includes('اعتماد الدورة متاح فقط من واجهة إدارة v6 الآمنة.')],

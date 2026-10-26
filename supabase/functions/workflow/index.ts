@@ -171,12 +171,50 @@ Deno.serve(async(req)=>{
  try{
   const {profile,db}=await requestUser(req); const body=await req.json(); const actionName=String(body.action||''); const payload=body.payload||{};
   if(!actionName)return json({error:'Missing action'},400);
-  if(profile.role==='ADMIN' && !(/^(ADMIN_CYCLE_|ADMIN_BATCH_|ADMIN_RESET_PASSWORD$|ADMIN_SETTINGS_UPDATE$|NOTIFICATION_|ACCOUNT_PASSWORD_CHANGE$)/.test(actionName)||actionName==='PASSWORD_CHANGED'))throw new Error('مدير النظام يدير الدورات والحسابات فقط، ولا يدير أعمال السكرتاريات.');
+  if(profile.role==='ADMIN' && !(/^(ADMIN_CYCLE_|ADMIN_BATCH_|ADMIN_RESET_PASSWORD$|ADMIN_MEMBER_SYNC$|ADMIN_SETTINGS_UPDATE$|NOTIFICATION_|ACCOUNT_PASSWORD_CHANGE$)/.test(actionName)||actionName==='PASSWORD_CHANGED'))throw new Error('مدير النظام يدير الدورات والحسابات فقط، ولا يدير أعمال السكرتاريات.');
 
 
   // v5.8: Permanent system administration is strictly distinct from organizational office.
-  if(actionName.startsWith('ADMIN_CYCLE_')||actionName.startsWith('ADMIN_BATCH_')||actionName==='ADMIN_RESET_PASSWORD'){
+  if(actionName.startsWith('ADMIN_CYCLE_')||actionName.startsWith('ADMIN_BATCH_')||actionName==='ADMIN_RESET_PASSWORD'||actionName==='ADMIN_MEMBER_SYNC'){
    if(profile.role!=='ADMIN')throw new Error('مدير النظام فقط يستطيع تنفيذ هذا الإجراء.');
+  }
+  if(actionName==='ADMIN_MEMBER_SYNC'){
+   // Strict identity key: university ID, never a name or email-only match.
+   const id=String(payload.profileId||''),uid=String(payload.universityId||'').trim();
+   const proposedName=String(payload.name||'').trim();const proposedEmail=String(payload.email||'').trim().toLowerCase();
+   const changeName=payload.updateName===true,changeEmail=payload.updateEmail===true;
+   if(!id||!uid||(!changeName&&!changeEmail))throw new Error('اختر العضو والحقول التي تريد تحديثها.');
+   const existingResult=await db.from('profiles').select('id,auth_user_id,university_id,full_name,email,batch_number,role').eq('id',id).single();
+   if(existingResult.error)throw existingResult.error;const existing=existingResult.data;
+   if(existing.role==='ADMIN'||String(existing.university_id||'').trim()!==uid)throw new Error('الرقم الجامعي لا يطابق حساب العضو. لم تُجر أي تغييرات.');
+   if(changeName&&(proposedName.length<3||proposedName.length>250))throw new Error('اسم العضو غير صالح.');
+   if(changeEmail&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(proposedEmail))throw new Error('البريد الإلكتروني الجديد غير صالح.');
+   const oldEmail=String(existing.email||'').trim().toLowerCase(),oldName=String(existing.full_name||'');
+   if(changeEmail&&proposedEmail!==oldEmail){
+    const conflict=await db.from('profiles').select('id').eq('email',proposedEmail).neq('id',id).limit(1);
+    if(conflict.error)throw conflict.error;if(conflict.data?.length)throw new Error('البريد الإلكتروني الجديد مستخدم لحساب آخر.');
+   }
+   const newEmail=changeEmail?proposedEmail:oldEmail,newName=changeName?proposedName:oldName;
+   if(newEmail===oldEmail&&newName===oldName)return json({ok:true,unchanged:true});
+   // Do not change passwords, student cohort or university ID. Keep Auth and public profile consistent.
+   const authBefore=await db.auth.admin.getUserById(existing.auth_user_id);
+   if(authBefore.error||!authBefore.data.user)throw authBefore.error||new Error('تعذر التحقق من حساب الدخول.');
+   const authEmail=String(authBefore.data.user.email||'');
+   if(changeEmail&&newEmail!==oldEmail){
+     const authUpdated=await db.auth.admin.updateUserById(existing.auth_user_id,{email:newEmail});
+     if(authUpdated.error)throw authUpdated.error;
+   }
+   const updated=await db.from('profiles').update({email:newEmail,full_name:newName,updated_at:new Date().toISOString()})
+     .eq('id',id).eq('university_id',uid).eq('email',existing.email).select('id,email,full_name').maybeSingle();
+   if(updated.error||!updated.data){
+     if(changeEmail&&newEmail!==oldEmail){
+       const rollback=await db.auth.admin.updateUserById(existing.auth_user_id,{email:authEmail});
+       if(rollback.error)throw new Error('تعذر إكمال تحديث البريد أو التراجع عنه. يحتاج الحساب مراجعة إدارية: '+id);
+     }
+     throw updated.error||new Error('تغيرت بيانات العضو أثناء التحديث؛ أعد فحصها.');
+   }
+   await audit(db,profile,'ADMIN_MEMBER_SYNC','PROFILE',id,{email:oldEmail,full_name:oldName},{email:newEmail,full_name:newName});
+   return json({ok:true,updated:updated.data});
   }
   if(actionName==='ADMIN_BATCH_CREATE'){
    const batch=Number(payload.batch),level=payload.academicLevel==null?null:Number(payload.academicLevel);
@@ -228,44 +266,20 @@ Deno.serve(async(req)=>{
    if(!cycle||cycle.status==='CLOSED')throw new Error('لا يمكن تعديل دفعات دورة مؤرشفة.');
    const known=(await db.from('kmsa_batches').select('batch_number').eq('batch_number',batch).eq('active',true).maybeSingle()).data;
    if(!known)throw new Error('أنشئ الدفعة أولًا في قسم الدفعات.');
+   if(actionName==='ADMIN_CYCLE_BATCH_ADD'){const grad=await db.from('kmsa_batches').select('graduated').eq('batch_number',batch).single();if(grad.error)throw grad.error;if(grad.data?.graduated)throw new Error('الدفعة متخرجة؛ لا يمكن ضمها إلى دورة جديدة.');}
    if(actionName==='ADMIN_CYCLE_BATCH_ADD'){
     const r=await db.from('cycle_batches').upsert({cycle_id:cycleId,batch_number:batch},{onConflict:'cycle_id,batch_number'});if(r.error)throw r.error;
    }else{
+    const exec=(await db.from('cycle_memberships').select('profile_id').eq('cycle_id',cycleId).in('role',['PRESIDENT','GS','SECRETARY']).is('ended_at',null)).data||[];
+    const assistant=(await db.from('kmsa_cycle_gs_assistants').select('profile_id').eq('cycle_id',cycleId)).data||[];
+    const officeIds=[...new Set([...exec,...assistant].map((x:any)=>x.profile_id))];
+    if(officeIds.length){const blocked=await db.from('profiles').select('id').eq('batch_number',batch).in('id',officeIds).limit(1);if(blocked.error)throw blocked.error;if(blocked.data?.length)throw new Error('تعذر إزالة الدفعة لأن أحد شاغلي مناصب اللجنة التنفيذية من أفرادها. غيّر التكليف أولًا.');}
     const r=await db.from('cycle_batches').delete().eq('cycle_id',cycleId).eq('batch_number',batch);if(r.error)throw r.error;
    }
    await audit(db,profile,actionName,'CYCLE',cycleId,null,{batch});return json({ok:true});
   }
-  if(actionName==='ADMIN_CYCLE_ASSISTANT_SET'){
-   const cycleId=String(payload.cycleId||''),memberId=String(payload.profileId||'');
-   const cycle=(await db.from('cycles').select('id,status,is_current').eq('id',cycleId).single()).data;
-   if(!cycle||cycle.status!=='DRAFT')throw new Error('تسجيل مساعد السكرتير العام يكون في دورة قيد الإعداد.');
-   const member=(await db.from('profiles').select('id,role').eq('id',memberId).eq('active',true).single()).data;
-   if(!member||member.role==='ADMIN')throw new Error('اختر حساب عضو، وليس مدير النظام.');
-   const leaders=(await db.from('cycle_memberships').select('role').eq('cycle_id',cycleId).eq('profile_id',memberId).in('role',['PRESIDENT','GS','SECRETARY']).limit(1)).data||[];
-   if(leaders.length)throw new Error('الشخص يشغل بالفعل مقعدًا قياديًا آخر في هذه الدورة.');
-   const old=(await db.from('kmsa_cycle_gs_assistants').select('*').eq('cycle_id',cycleId).maybeSingle()).data;
-   const r=await db.from('kmsa_cycle_gs_assistants').upsert({cycle_id:cycleId,profile_id:memberId},{onConflict:'cycle_id'});if(r.error)throw r.error;
-   const membership=await db.from('cycle_memberships').upsert({cycle_id:cycleId,profile_id:memberId,role:'MEMBER',secretariat_id:null},{onConflict:'cycle_id,profile_id',ignoreDuplicates:true});if(membership.error)throw membership.error;
-   await audit(db,profile,'ADMIN_CYCLE_ASSISTANT_SET','CYCLE',cycleId,old,{profile_id:memberId});return json({ok:true});
-  }
-  if(actionName==='ADMIN_CYCLE_LEADER_SET'){
-   const cycleId=String(payload.cycleId||'');const memberId=String(payload.profileId||'');
-   const role=String(payload.role||'');const sid=role==='SECRETARY'?String(payload.secretariatId||''):null;
-   if(!['SECRETARY','GS','PRESIDENT'].includes(role))throw new Error('هذه الواجهة لتعيين الرئيس والسكرتارين فقط.');
-   if(role==='SECRETARY'&&!sid)throw new Error('حدد السكرتارية.');
-   const cycle=(await db.from('cycles').select('*').eq('id',cycleId).single()).data;
-   if(!cycle||cycle.is_current||cycle.status!=='DRAFT')throw new Error('تعيين القيادة يكون في دورة قيد التهيئة فقط.');
-   const member=(await db.from('profiles').select('id,role').eq('id',memberId).eq('active',true).single()).data;
-   if(!member||member.role==='ADMIN')throw new Error('اختر حساب عضو صالحًا، وليس حساب مدير النظام.');
-   // One leader per secretariat / central role. Replace in the draft, never silently add a second leader.
-   if(sid){const prior=(await db.from('cycle_memberships').select('profile_id').eq('cycle_id',cycleId).eq('role','SECRETARY').eq('secretariat_id',sid).is('ended_at',null)).data||[];
-     for(const x of prior)if(x.profile_id!==memberId){const r=await db.from('cycle_memberships').update({role:'MEMBER',secretariat_id:null}).eq('cycle_id',cycleId).eq('profile_id',x.profile_id);if(r.error)throw r.error;}
-   }else{const prior=(await db.from('cycle_memberships').select('profile_id').eq('cycle_id',cycleId).eq('role',role).is('ended_at',null)).data||[];
-     for(const x of prior)if(x.profile_id!==memberId){const r=await db.from('cycle_memberships').update({role:'MEMBER',secretariat_id:null}).eq('cycle_id',cycleId).eq('profile_id',x.profile_id);if(r.error)throw r.error;}
-   }
-   const r=await db.from('cycle_memberships').upsert({cycle_id:cycleId,profile_id:memberId,role,secretariat_id:sid,ended_at:null},{onConflict:'cycle_id,profile_id'}).select().single();if(r.error)throw r.error;
-   await audit(db,profile,'ADMIN_CYCLE_LEADER_SET','CYCLE',cycleId,null,{profile_id:memberId,role,secretariat_id:sid});
-   return json({ok:true,membership:r.data});
+  if(actionName==='ADMIN_CYCLE_ASSISTANT_SET'||actionName==='ADMIN_CYCLE_LEADER_SET'){
+   throw new Error('تم إيقاف طريقة التعيين القديمة. استخدم إدارة القيادة بعد تحديث النظام إلى v6.2.');
   }
   if(actionName==='ADMIN_CYCLE_ACTIVATE'){ throw new Error('اعتماد الدورة متاح فقط من واجهة إدارة v6 الآمنة.');
    const cycleId=String(payload.cycleId||'');if(!cycleId)throw new Error('اختر الدورة.');

@@ -3,6 +3,7 @@ import {UserPlus,X} from 'lucide-react';
 import {workflow} from '../lib/api';
 import {supabase} from '../lib/supabase';
 import './admin-v6.css';
+import {adminReport,adminToast} from './KmsaAdminNotice';
 export default function KmsaSingleMember({batch,onDone}:{batch:number;onDone:()=>void}){
  const [open,setOpen]=useState(false),[name,setName]=useState(''),[universityId,setUniversityId]=useState(''),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
  async function save(){setBusy(true);setError('');try{
@@ -11,8 +12,8 @@ export default function KmsaSingleMember({batch,onDone}:{batch:number;onDone:()=
   if(data?.[0]?.status!=='READY')throw new Error('الرقم الجامعي أو البريد موجود مسبقًا، أو يحتاج مراجعة قبل إنشاء الحساب.');
   const r=await workflow('ADMIN_BATCH_IMPORT',{batch,initialPassword:password,people:[{name,universityId,email,contacts:{}}]});
   const item=r.results?.[0];if(item?.status!=='CREATED')throw new Error(item?.reason||'تعذر إنشاء الحساب.');
-  setOpen(false);setPassword('');setName('');setUniversityId('');setEmail('');onDone();
- }catch(e:any){setError(e.message||'تعذر حفظ العضو.');}finally{setBusy(false)}}
+  setOpen(false);setPassword('');setName('');setUniversityId('');setEmail('');onDone();adminToast('success','تم إنشاء حساب العضو في الدفعة.');
+ }catch(e:any){setError('');adminReport(e);}finally{setBusy(false)}}
  return <><button className="v6-admin-button" onClick={()=>setOpen(true)}><UserPlus size={15}/> إضافة عضو</button>{open&&<div className="v6-modal-layer" role="presentation" onClick={()=>!busy&&setOpen(false)}><div className="v6-modal" role="dialog" aria-modal="true" aria-label="إضافة عضو" onClick={e=>e.stopPropagation()} dir="rtl">
  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}><h3>إضافة عضو إلى الدفعة {batch}</h3><button className="v6-link" disabled={busy} onClick={()=>setOpen(false)}><X size={18}/></button></div>
  <label className="v6-field">الاسم الكامل<input value={name} onChange={e=>setName(e.target.value)}/></label>

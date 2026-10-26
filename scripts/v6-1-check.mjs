@@ -29,7 +29,7 @@ const checks=[
  ['No freeze / academic individual status',!page.includes('التجميد')&&!page.includes('الحالة الأكاديمية')],
  ['Member move only selects a new batch',page.includes("'ADMIN_BATCH_MEMBER_MOVE'")&&!page.includes('سبب النقل')],
  ['Account recovery from member details',page.includes("'ADMIN_RESET_PASSWORD'")&&page.includes('MemberDetail')],
- ['Leader selection uses server search rather than 5000-member dropdown',page.includes('<SearchPeople batch={personBatch?Number(personBatch):null}')&&!page.includes('.limit(5000)')],
+ ['Leader selection uses server search rather than 5000-member dropdown',page.includes('<SearchPeople cycleId={cycle.id} batch={personBatch?Number(personBatch):null}')&&!page.includes('.limit(5000)')],
  ['Leadership can change within active cycle via v6 RPC',page.includes('kmsa_admin_replace_leader')&&original.includes("target_cycle.status NOT IN('DRAFT','OPEN')")],
  ['General secretary assistant seat preserved',page.includes('GS_ASSISTANT')&&page.includes('kmsa_admin_replace_assistant')],
  ['Batch membership selectable within cycle',page.includes("'ADMIN_CYCLE_BATCH_ADD'")&&page.includes("'ADMIN_CYCLE_BATCH_REMOVE'")],
