@@ -63,7 +63,7 @@ export async function workspaceProjects(): Promise<Initiative[]> {
 export async function workspaceProject(id:string): Promise<ProjectBundle> {
   // First locate this project's results; then load only its milestones/evidence.
   // A secretary must not download the association's entire activity ledger to open one project.
-  const [i,r,u,p,pi,o,a,sv,se,dr]=await Promise.all([
+  const [i,r,u,p,pi,o,a,sv,se,dr,cr,sf]=await Promise.all([
     supabase.from('initiatives').select('*,secretariat:secretariats(*),owner:profiles!initiatives_owner_id_fkey(id,full_name),secretary:profiles!initiatives_secretary_id_fkey(id,full_name)').eq('id',id).single(),
     supabase.from('results').select('*,owner:profiles!results_owner_id_fkey(id,full_name)').eq('initiative_id',id).order('created_at'),
     supabase.from('project_updates').select('*,author:profiles(full_name)').eq('initiative_id',id).order('created_at',{ascending:false}),
@@ -73,9 +73,11 @@ export async function workspaceProject(id:string): Promise<ProjectBundle> {
     supabase.from('project_activity_entries').select('*,author:profiles!project_activity_entries_author_id_fkey(id,full_name)').eq('initiative_id',id).order('created_at',{ascending:false}),
     supabase.from('project_supervision_assignments').select('*,supervisor:profiles!project_supervision_assignments_supervisor_id_fkey(id,full_name)').eq('initiative_id',id).maybeSingle(),
     supabase.from('milestone_supervision_events').select('*,actor:profiles!milestone_supervision_events_actor_id_fkey(id,full_name)').eq('initiative_id',id).order('created_at',{ascending:false}),
-    supabase.from('milestone_deadline_requests').select('*').eq('initiative_id',id).order('created_at',{ascending:false})
+    supabase.from('milestone_deadline_requests').select('*').eq('initiative_id',id).order('created_at',{ascending:false}),
+    supabase.from('project_closure_requests').select('*').eq('initiative_id',id).order('requested_at',{ascending:false}),
+    supabase.from('project_supervision_followups').select('*').eq('initiative_id',id).order('created_at',{ascending:false})
   ]);
-  for(const x of [i,r,u,p,pi,o,a,sv,se,dr]) if(x.error)throw x.error;
+  for(const x of [i,r,u,p,pi,o,a,sv,se,dr,cr,sf]) if(x.error)throw x.error;
   const resultIds=(r.data||[]).map((x:any)=>x.id);
   const m=resultIds.length?await supabase.from('milestones').select('*,owner:profiles!milestones_owner_id_fkey(id,full_name),result:results(*)').in('result_id',resultIds).order('sequence_no').order('due_at'):{data:[],error:null};
   if(m.error)throw m.error;
@@ -85,7 +87,7 @@ export async function workspaceProject(id:string): Promise<ProjectBundle> {
     milestoneIds.length?supabase.from('milestone_evidence').select('*').in('milestone_id',milestoneIds).order('created_at',{ascending:false}):Promise.resolve({data:[],error:null})
   ]);
   if(b.error)throw b.error;if(e.error)throw e.error;
-  return {initiative:i.data as Initiative,results:(r.data||[]) as ResultItem[],milestones:(m.data||[]) as Milestone[],updates:(u.data||[]) as ProjectUpdate[],permissions:(p.data||[]) as ProjectPermission[],interventions:(pi.data||[]) as ProjectIntervention[],blockers:(b.data||[]) as Blocker[],oversight:o.data||[],activity:a.data||[],evidence:(e.data||[]) as Evidence[], supervisor:sv.data||null, supervisionEvents:se.data||[], deadlineRequests:dr.data||[]};
+  return {initiative:i.data as Initiative,results:(r.data||[]) as ResultItem[],milestones:(m.data||[]) as Milestone[],updates:(u.data||[]) as ProjectUpdate[],permissions:(p.data||[]) as ProjectPermission[],interventions:(pi.data||[]) as ProjectIntervention[],blockers:(b.data||[]) as Blocker[],oversight:o.data||[],activity:a.data||[],evidence:(e.data||[]) as Evidence[], supervisor:sv.data||null, supervisionEvents:se.data||[], deadlineRequests:dr.data||[], closureRequests:cr.data||[], supervisionFollowups:sf.data||[]};
 }
 export async function projectPermissionsPending(): Promise<(ProjectPermissionApproval & {permission:ProjectPermission})[]> {
   const {data,error}=await supabase.rpc('permission_approval_queue');if(error)throw error;return (data||[]) as any;
@@ -103,7 +105,12 @@ export async function memberDirectorySearch(query=''): Promise<MemberDirectoryIt
   const {data,error}=await supabase.rpc('member_directory_search',{p_query:query}); if(error)throw error; return (data||[]) as MemberDirectoryItem[];
 }
 export async function workspaceProjectSheet(): Promise<ProjectSheetRow[]> {
-  const {data,error}=await supabase.rpc('workspace_project_sheet'); if(error)throw error; return (data||[]) as ProjectSheetRow[];
+  const {data,error}=await supabase.rpc('workspace_project_sheet');if(error)throw error;
+  const rows=(data||[]) as ProjectSheetRow[];if(!rows.length)return rows;
+  const {data:states,error:stateError}=await supabase.from('initiatives').select('id,lifecycle_state').in('id',rows.map(r=>r.project_id));
+  if(stateError)throw new Error('تعذر تحميل حالات الإغلاق والتأجيل؛ صورة المتابعة قد تكون ناقصة: '+stateError.message);
+  const byId=new Map((states||[]).map(x=>[x.id,x.lifecycle_state]));
+  return rows.map(r=>({...r,lifecycle_state:byId.get(r.project_id)||'ACTIVE'}));
 }
 export async function proposalTrackingSheet(): Promise<ProposalSheetRow[]> {
   const {data,error}=await supabase.rpc('proposal_tracking_sheet'); if(error)throw error; return (data||[]) as ProposalSheetRow[];

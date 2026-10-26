@@ -18,7 +18,6 @@ const memberItems=[
 const workspaceItems=[
  {to:'/workspace',label:'الرئيسية',icon:Gauge,roles:['APPLICANT','MEMBER','SECRETARY','GS','PRESIDENT','ADMIN']},
  {to:'/workspace/projects',label:'المشاريع',icon:Target,roles:['APPLICANT','MEMBER','SECRETARY','GS','PRESIDENT','ADMIN']},
- {to:'/workspace/supervision',label:'إشراف السكرتارية',icon:Radar,roles:['SECRETARY','ADMIN']},
  {to:'/workspace/tasks',label:'المهام',icon:ClipboardList,roles:['APPLICANT','MEMBER','SECRETARY','GS','PRESIDENT','ADMIN']},
  {to:'/workspace/routine',label:'العمل الدوري',icon:RefreshCw,roles:['APPLICANT','MEMBER','SECRETARY','GS','PRESIDENT','ADMIN']},
  {to:'/workspace/proposals',label:'المقترحات',icon:FileText,roles:['SECRETARY','GS','PRESIDENT','ADMIN']},

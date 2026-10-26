@@ -31,7 +31,7 @@ test('Notifications anchored to viewport',styles.includes('.notification-popover
 test('Home action lists grouped by category',home.includes('v55-action-groups')&&home.includes('v55-action-card'));
 test('Home new review actions included',home.includes('workspaceReviewerQueue')&&home.includes('reviewQueue'));
 test('Home failures surfaced, not replaced with all-clear',home.includes('النتائج الظاهرة قد تكون غير مكتملة'));
-test('Secretary supervision page linked',app.includes('WorkspaceSupervisionPage')&&shell.includes('/workspace/supervision'));
+test('Secretary supervision is reachable inside Projects',app.includes('/workspace/projects?tab=supervision')&&get('apps/web/src/pages/WorkspaceProjectsPage.tsx').includes('WorkspaceSupervisionPage')); 
 test('Delegation displayed and reviewer matched to source update',desk.includes('project_supervision_assignments')&&desk.includes('source_activity_id===latest.id'));
 test('Activity versions remain in event log',project.includes('projectTimeline')&&project.includes('project-log'));
 test('No new org chart or mandatory reports',!existsSync(join(root,'apps/web/src/pages/WorkspaceStructurePage.tsx'))&&!desk.includes('يومي إلزامي'));

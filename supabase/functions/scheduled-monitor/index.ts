@@ -20,9 +20,9 @@ Deno.serve(async(req)=>{if(req.method==='OPTIONS')return new Response('ok',{head
  // Requests are proportional to the milestone duration, not a daily/weekly reporting obligation.
  // A reminder is not a finding of negligence; no supervisor approval blocks execution.
  const dueSoon=72*3600000;
- const {data:ms}=await db.from('milestones').select('*,result:results(initiative_id,initiative:initiatives(id,title,owner_id,secretary_id,setup_status,approval_status,status,assignment_start_at))').not('status','in','("VERIFIED","CANCELLED","READY_FOR_VERIFICATION")');
+ const {data:ms}=await db.from('milestones').select('*,result:results(initiative_id,initiative:initiatives(id,title,owner_id,secretary_id,setup_status,approval_status,status,lifecycle_state,assignment_start_at))').not('status','in','("VERIFIED","CANCELLED","READY_FOR_VERIFICATION")');
  for(const m of ms||[]){
-  const project=m.result?.initiative;if(!project||project.setup_status!=='ACTIVE'||project.approval_status!=='APPROVED'||['COMPLETED','CANCELLED'].includes(project.status))continue;
+  const project=m.result?.initiative;if(!project||project.setup_status!=='ACTIVE'||project.approval_status!=='APPROVED'||['COMPLETED','CANCELLED'].includes(project.status)||project.lifecycle_state==='POSTPONED')continue;
   // Relative milestones start after their predecessor finishes; its earlier planned date is only a forecast.
   if(m.deadline_mode==='RELATIVE'&&m.relative_to_milestone_id){const previous=(await db.from('milestones').select('completed_reported_at').eq('id',m.relative_to_milestone_id).maybeSingle()).data;if(!previous?.completed_reported_at)continue;}
   const due=new Date(m.due_at).getTime();let created=Math.max(new Date(m.created_at).getTime(),project.assignment_start_at?new Date(project.assignment_start_at).getTime():0);
@@ -52,7 +52,7 @@ Deno.serve(async(req)=>{if(req.method==='OPTIONS')return new Response('ok',{head
   const reviewPoints=span>14*86400000?[created+span*.5,due-span*.15]:[firstCheck];
   for(let k=0;k<reviewPoints.length;k++){
    const checkpoint=reviewPoints[k];if(nowMs<checkpoint)continue;
-   const {data:review}=await db.from('milestone_supervision_events').select('id').eq('milestone_id',m.id).in('event_type',['PROGRESS_REVIEW','COMPLETION_READ']).gte('created_at',new Date(checkpoint).toISOString()).limit(1);
+   const {data:review}=await db.from('milestone_supervision_events').select('id').eq('milestone_id',m.id).in('event_type',['PROGRESS_REVIEW','COMPLETION_READ','PROGRESS_OK','PROGRESS_FOLLOW_UP','RESULT_OK','RESULT_REVISION']).gte('created_at',new Date(checkpoint).toISOString()).limit(1);
    if((review||[]).length)continue;
    const tag=`MILESTONE_SUPERVISOR_REVIEW_${k+1}`;
    const {data:sent}=await db.from('notification_log').select('created_at').eq('event_type',tag).eq('entity_type','MILESTONE').eq('entity_id',m.id).limit(1);
@@ -67,8 +67,28 @@ Deno.serve(async(req)=>{if(req.method==='OPTIONS')return new Response('ok',{head
   }
   if(late)await queueSystemNotice(db,'MILESTONE_OVERDUE','MILESTONE',m.id);
  }
+ // Secretary accountability: a logged reminder is not a resolved review. Notify only if a delegated update
+ // is still missing an evaluation; once the secretary records a follow-up, its due time is monitored.
+ const {data:delegations}=await db.from('project_supervision_assignments').select('initiative_id,supervisor_id,assigned_at');
+ for(const delegation of delegations||[]){
+  const project=(await db.from('initiatives').select('id,title,secretary_id,status,lifecycle_state').eq('id',delegation.initiative_id).maybeSingle()).data;
+  if(!project||!project.secretary_id||project.secretary_id===delegation.supervisor_id||['COMPLETED','CANCELLED'].includes(project.status)||project.lifecycle_state==='POSTPONED')continue;
+  const recent=(await db.from('project_activity_entries').select('id,milestone_id,created_at').eq('initiative_id',project.id).eq('kind','MILESTONE_UPDATE').gte('created_at',new Date(nowMs-30*86400000).toISOString()).order('created_at',{ascending:false}).limit(35)).data||[];
+  for(const update of recent){
+   if(nowMs-new Date(update.created_at).getTime()<48*3600000||(delegation.assigned_at&&new Date(update.created_at)<new Date(delegation.assigned_at)))continue;
+   const reviewed=(await db.from('milestone_supervision_events').select('id').eq('source_activity_id',update.id).eq('actor_id',delegation.supervisor_id).in('event_type',['PROGRESS_OK','PROGRESS_FOLLOW_UP','RESULT_OK','RESULT_REVISION']).limit(1).maybeSingle()).data;
+   if(reviewed)continue;
+   const follow=(await db.from('project_supervision_followups').select('id,followup_due_at').eq('source_activity_id',update.id).eq('secretary_id',project.secretary_id).order('created_at',{ascending:false}).limit(1).maybeSingle()).data;
+   const actionable=follow&&new Date(follow.followup_due_at).getTime()<=nowMs;
+   if(!follow||actionable){
+    await inboxNotify(db,project.secretary_id,actionable?'DELEGATE_FOLLOWUP_DUE':'DELEGATE_REVIEW_GAP',`مشروع ${project.title}: متابعة النائب لم تُحسم`,actionable?'انتهت مهلة الإجراء الذي سجلته؛ المطلوب منك مراجعة نتيجته.':'تحديث مرّ عليه 48 ساعة دون تقييم من المتابع المفوض؛ المطلوب استيضاح الأمر عند الحاجة.','ACTIVITY',update.id,`/workspace/projects?tab=supervision`);
+   }
+  }
+ }
+
  const {data:projects}=await db.from('initiatives').select('*').eq('setup_status','ACTIVE').not('status','in','("COMPLETED","CANCELLED")');
  for(const project of projects||[]){
+  if(project.lifecycle_state==='POSTPONED')continue;
   const due=project.target_due_at?new Date(project.target_due_at).getTime():null;
   if(due&&due<nowMs)await queueSystemNotice(db,'PROJECT_EARLY_WARNING','INITIATIVE',project.id,'SECRETARY');
  }

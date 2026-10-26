@@ -315,3 +315,27 @@
 .v54-state-select{outline-offset:1px}.v54-state-select select{font-size:12.5px!important}
 @media(max-width:900px){.v55-action-groups{grid-template-columns:1fr}.workspace-page{padding:18px 14px 70px!important}.v55-top-heading span{display:none!important}.workspace-topbar .workspace-home-chip.v55-member-shortcut{width:36px!important;padding:0!important;overflow:hidden!important;font-size:0!important;justify-content:center!important}.workspace-topbar .workspace-home-chip.v55-member-shortcut svg{flex:none}.v55-supervision-stats{grid-template-columns:1fr 1fr}.v55-supervision-stats>div:last-child{grid-column:1/-1}}
 @media(max-width:480px){.v55-top-logo{width:32px;height:32px}.v55-top-heading strong{font-size:13px!important}.v55-action-head{padding:15px}.v55-supervision-stats{grid-template-columns:1fr}.v55-supervision-stats>div:last-child{grid-column:auto}}
+
+/* v5.6 — projects keep execution and delegated supervision in one section. */
+.v56-project-tabs{display:inline-flex;gap:4px;align-self:flex-start;padding:5px;background:var(--surface-2,#f3f4f6);border-radius:15px;border:1px solid #e3e7e6}
+.v56-project-tabs button{border:0;background:transparent;padding:10px 18px;border-radius:11px;font:inherit;font-weight:700;color:#606a69;cursor:pointer}
+.v56-project-tabs button.active{background:#fff;color:#174d41;box-shadow:0 2px 10px #182c2720}
+.v56-project-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 14px}
+.v56-lifecycle-label{color:#185e50;font-weight:700!important}
+.v56-pending-closure{display:flex;gap:8px;align-items:center;padding:10px 14px;border:1px solid #edd6a8;background:#fff8e9;border-radius:12px;color:#8a5b19}
+.v56-focus-card{padding:18px 22px;margin:0 0 16px;border:1px solid #dce9e2;border-radius:20px;background:linear-gradient(120deg,#fff 63%,#effaf4);box-shadow:0 10px 34px #152a2311}
+.v56-focus-head{display:flex;justify-content:space-between;align-items:center;gap:18px}
+.v56-focus-head h2{font-size:clamp(17px,2vw,22px);margin:3px 0 0}
+.v56-focus-update{font-size:clamp(15px,1.5vw,18px);line-height:1.9;font-weight:600;color:#253d36;margin:13px 0}
+.v56-focus-footer{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px solid #dce7e3;padding-top:11px}
+.v56-focus-footer small{color:#687a73}
+.v56-manage{display:grid;gap:16px}.v56-manage-section{background:#f8faf9;border:1px solid #e2e9e5;border-radius:15px;padding:16px;display:grid;gap:10px}.v56-manage-section p{margin:0}
+.v56-closure-form{display:grid;gap:14px}.v56-closure-form .field{display:grid;gap:6px}.v56-closure-form p{margin:4px 0;line-height:1.75}
+.v56-gaps{border:1px solid #ead6b3;background:#fffdf9;border-radius:20px;padding:17px;margin:16px 0}
+.v56-gaps-title{display:grid;gap:4px;margin-bottom:8px}.v56-gaps-title span{font-size:12px;color:#7a6654}
+.v56-gap-row{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:12px 0;border-top:1px solid #eee5d7}
+.v56-gap-row>div{display:grid;gap:5px;flex:1;min-width:0}.v56-gap-row small{color:#596d64;line-height:1.6}.v56-gap-row>a{font-size:13px;color:#17684e;white-space:nowrap}
+.v56-gap-modal-overlay{position:fixed;z-index:1100;inset:0;background:#071b1499;display:grid;place-items:center;padding:16px;backdrop-filter:blur(3px)}
+.v56-gap-modal{width:min(100%,560px);max-height:90vh;overflow:auto;background:#fff;border-radius:20px;box-shadow:0 25px 75px #0003;padding:24px;display:grid;gap:12px}
+.v56-gap-modal h2{margin:0}.v56-gap-modal p{margin:0}.v56-gap-modal .workspace-inline-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
+@media (max-width:800px){.v56-focus-card{padding:15px}.v56-gap-row{align-items:flex-start;flex-wrap:wrap}.v56-project-tabs{width:100%}.v56-project-tabs button{flex:1}.v56-focus-footer{justify-content:space-between}}

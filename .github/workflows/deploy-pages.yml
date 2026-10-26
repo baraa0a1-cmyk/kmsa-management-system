@@ -41,6 +41,8 @@ jobs:
         run: node ../../scripts/v5-4-check.mjs
       - name: Verify v5.5 review versions and supervision navigation
         run: node ../../scripts/v5-5-check.mjs
+      - name: Verify v5.6 lifecycle and delegated supervision
+        run: node ../../scripts/v5-6-check.mjs
       - name: Build
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
