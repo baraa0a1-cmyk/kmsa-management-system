@@ -6,6 +6,7 @@ import WorkspaceProjectDecisionsPage from './WorkspaceProjectDecisionsPage';
 import { exportCsv, secretariats, workspaceProjectSheet } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { loadProjectFollowup, followupIssueLabel, type FollowupSnapshot } from '../lib/projectFollowup';
+import {loadSupervisionOverview} from '../lib/supervisionOverview';
 import { useAuth } from '../hooks/useAuth';
 import type { ProjectSheetRow, Secretariat } from '../lib/types';
 import { formatDate, formatDateTime, milestoneStatusLabel } from '../lib/labels';
@@ -33,8 +34,8 @@ export default function WorkspaceProjectsPage(){
   for(let i=0;i<scoped.length;i+=80){const resp=await supabase.from('project_closure_requests').select('id',{count:'exact',head:true}).in('initiative_id',scoped.slice(i,i+80).map(x=>x.project_id)).eq('status','PENDING');if(!live)return;if(resp.error){setError('تعذر قراءة عداد قرارات المشاريع: '+resp.error.message);break;}pending+=resp.count||0;}
   if(live)setPendingDecisions(pending);
   // Shared v6.4 read model: the counter and the actual supervision page use identical rules.
-  const summary=await loadProjectFollowup(scoped,profile.id);
-  if(live){setSnapshot(summary);setSupervisionCount(summary.items.filter(x=>x.secretaryAction!==null||(!x.delegated&&!!x.update&&!x.review)).length);}
+  const [summary,overview]=await Promise.all([loadProjectFollowup(scoped,profile.id),loadSupervisionOverview(scoped,profile.id)]);
+  if(live){setSnapshot(summary);setSupervisionCount(overview.filter(x=>x.lateChecks||x.lateReports>0||x.pausePending||x.openActions.some(y=>new Date(y.due_at).getTime()<Date.now())).length);}
  }).catch(e=>{if(live){setError(e?.message||'تعذر جلب قائمة المشاريع.');setBusy(false)}});return()=>{live=false};},[profile?.id,profile?.secretariat_id,profile?.role,hasSupervision,tab,refreshRevision]);
  useEffect(()=>{setOwnersOpen(false);setSupervisorsOpen(false)},[tab]);
  useEffect(()=>{const dismiss=(e:PointerEvent)=>{if(!ownerWrap.current?.contains(e.target as Node))setOwnersOpen(false);if(!supervisorWrap.current?.contains(e.target as Node))setSupervisorsOpen(false)};

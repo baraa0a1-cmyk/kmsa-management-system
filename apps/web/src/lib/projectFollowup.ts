@@ -45,13 +45,14 @@ export async function loadProjectFollowup(projects:ProjectSheetRow[], secretaryI
  const active=projects.filter(p=>p.approval_status==='APPROVED'&&p.setup_status==='ACTIVE'&&p.project_status!=='COMPLETED'&&p.project_status!=='CANCELLED'&&p.lifecycle_state!=='POSTPONED');
  if(!active.length)return {items:[],secretaryActions:[],reviewPending:[],reportLate:[]};
  const ids=active.map(p=>p.project_id);const projectById=new Map(active.map(p=>[p.project_id,p]));
- const [assignments, schedules, activities,reviews,requests]=await Promise.all([
+ const [assignments, schedules, activities,reviews,requests,pauses]=await Promise.all([
   readAll('project_supervision_assignments','initiative_id,supervisor_id,assigned_at,supervisor:profiles!project_supervision_assignments_supervisor_id_fkey(full_name)',ids,undefined,'assigned_at'),
   readAll('milestone_followup_schedules','milestone_id,initiative_id,interval_hours,next_due_at,last_report_at',ids,undefined,'next_due_at'),
   // Pending result reviews have no active check-in schedule; include all milestones.
   readAll('project_activity_entries','id,initiative_id,milestone_id,created_at,note,status_after,details',ids,q=>q.eq('kind','MILESTONE_UPDATE')),
   readAll('milestone_supervision_events','id,initiative_id,milestone_id,source_activity_id,actor_id,event_type,note,correction_due_at,created_at',ids,q=>q.in('event_type',['PROGRESS_OK','PROGRESS_FOLLOW_UP','PROGRESS_UNCLEAR','RESULT_OK','RESULT_REVISION'])),
-  readAll('project_supervision_followups','id,initiative_id,source_activity_id,delegated_supervisor_id,review_request_attempt,action_kind,followup_due_at,created_at',ids,q=>q)
+  readAll('project_supervision_followups','id,initiative_id,source_activity_id,delegated_supervisor_id,review_request_attempt,action_kind,followup_due_at,created_at',ids,q=>q),
+  readAll('project_execution_pauses','id,initiative_id,status,pause_until_date,created_at',ids,q=>q.eq('status','APPROVED'))
  ]);
  // Milestones are retrieved via results IDs of scoped projects (never a global scan).
  const results=await readAll('results','id,initiative_id',ids,undefined,'created_at');
@@ -73,10 +74,10 @@ export async function loadProjectFollowup(projects:ProjectSheetRow[], secretaryI
  }
  const requestsBySource=new Map<string,FollowupRequest[]>();
  for(const r of requests as FollowupRequest[]){const key=r.source_activity_id+':'+r.delegated_supervisor_id;requestsBySource.set(key,[...(requestsBySource.get(key)||[]),r]);}
- const now=Date.now();const items:FollowupItem[]=[];
+ const now=Date.now();const today=new Intl.DateTimeFormat('sv-SE',{timeZone:'Africa/Khartoum'}).format(new Date());const pausedProjects=new Set(pauses.filter(x=>x.pause_until_date>=today).map(x=>x.initiative_id));const items:FollowupItem[]=[];
  for(const m of mrows){
   if(m.design_status==='REJECTED'||m.status==='VERIFIED'||m.status==='CANCELLED')continue;
-  const project=projectForResult.get(m.result_id);if(!project)continue;
+  const project=projectForResult.get(m.result_id);if(!project||pausedProjects.has(project.project_id))continue;
   const a=assignmentsByProject.get(project.project_id);
   const supervisorId=a?.supervisor_id||project.secretary_id||secretaryId;
   const delegated=!!a?.supervisor_id&&a.supervisor_id!==project.secretary_id;
@@ -89,8 +90,8 @@ export async function loadProjectFollowup(projects:ProjectSheetRow[], secretaryI
   const sourceRequests=allFollowups.filter(x=>x.review_request_attempt!==null).sort((x,y)=>(x.review_request_attempt||0)-(y.review_request_attempt||0));
   const lastCorrection=(reviews as FollowupReview[]).filter(r=>r.milestone_id===m.id&&r.actor_id===supervisorId&&['PROGRESS_FOLLOW_UP','PROGRESS_UNCLEAR','RESULT_REVISION'].includes(r.event_type)).sort((x,y)=>time(y.created_at)-time(x.created_at))[0];
   const resultReady=complete(m.status);
-  const updateAfterCorrection=!!(lastCorrection&&activity&&time(activity.created_at)>time(lastCorrection.created_at));
-  const correctionPending=!!lastCorrection&&!updateAfterCorrection;
+  const positiveAfterCorrection=!!lastCorrection&&(reviews as FollowupReview[]).some(r=>r.milestone_id===m.id&&r.actor_id===supervisorId&&['PROGRESS_OK','RESULT_OK'].includes(r.event_type)&&time(r.created_at)>time(lastCorrection.created_at));
+  const correctionPending=!!lastCorrection&&!positiveAfterCorrection;
   const noReport=!!schedule&&!resultReady&&time(schedule.next_due_at)<now;
   const reviewIsOverdue=!!activity&&!review&&accountable&&time(reviewDueAt(activity,schedule))<=now;
   let issue:FollowupItem['issue']='ON_TRACK';let action:FollowupItem['secretaryAction']=null;

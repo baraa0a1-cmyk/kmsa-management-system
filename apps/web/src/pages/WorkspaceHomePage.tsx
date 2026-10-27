@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { proposalTrackingSheet, quickTaskSheet, routineObligationSheet, workspaceProjectSheet } from '../lib/api';
 import { useAuth } from '../hooks/useAuth';
 import { loadProjectFollowup } from '../lib/projectFollowup';
+import {loadSupervisionOverview} from '../lib/supervisionOverview';
 import type { ProjectSheetRow, ProposalSheetRow, QuickTaskRow, RoutineObligationRow } from '../lib/types';
 import { formatDate, profileTitle } from '../lib/labels';
 
@@ -35,14 +36,15 @@ export default function WorkspaceHomePage(){
     const waiting=snapshot.reviewPending.filter(x=>x.supervisorId===profile.id && (x.project.lead_id!==profile.id||(profile.role==='SECRETARY'&&x.project.secretary_id===profile.id))).map(x=>({projectId:x.project.project_id,title:x.project.project_title,milestoneTitle:x.milestoneTitle,milestoneId:x.milestoneId,createdAt:x.update!.created_at,isResult:['READY_FOR_VERIFICATION','VERIFIED'].includes(x.update!.status_after||'')}));
     setReviewQueue(waiting.map(v=>({key:`review-${v.milestoneId}`,kind:'project' as const,title:v.title,route:`/workspace/projects/${v.projectId}?milestone=${v.milestoneId}&action=review`,date:v.createdAt,priority:0,text:`${v.isResult?'نتيجة':'تحديث'} محطة «${v.milestoneTitle}» ينتظر تقييمك. المطلوب: افتح المحطة وقيّم ${v.isResult?'النتيجة':'التقدم'}.`})));
    }catch{failed.push('تقييمات المشاريع');setReviewQueue([])}
-   if(profile.role==='SECRETARY'&&snapshot){
+   if(profile.role==='SECRETARY'){
     try{
-     const projectSeen=new Set<string>();
-     setMonitorFocus(snapshot.secretaryActions.filter(x=>x.delegated||x.secretaryAction==='REQUEST_UPDATE').filter(x=>{if(projectSeen.has(x.project.project_id))return false;projectSeen.add(x.project.project_id);return true}).map(x=>({
+     const projectRows=result[0].value.filter(p=>p.secretary_id===profile.id||p.secretariat_id===profile.secretariat_id);
+     const overview=await loadSupervisionOverview(projectRows,profile.id);
+     setMonitorFocus(overview.filter(x=>!x.isPaused&&(x.pausePending||x.lateChecks||x.lateReports>0||x.openActions.some(a=>new Date(a.due_at).getTime()<Date.now()))).map(x=>({
       key:`monitor-${x.project.project_id}`,kind:'project' as const,title:x.project.project_title,
-      route:x.secretaryAction==='REQUEST_UPDATE'?`/workspace/projects/${x.project.project_id}?milestone=${x.milestoneId}&action=request-update`:'/workspace/projects?tab=supervision',
-      date:x.schedule?.next_due_at||x.reviewDueAt||x.correctionDueAt||null,
-      priority:0,text:x.secretaryAction==='REQUEST_UPDATE'?`لم تصل إفادة «${x.milestoneTitle}» في موعدها`:x.secretaryAction==='REQUEST_REVIEW'?`تأخر تقييم المتابع لمحطة «${x.milestoneTitle}»`:x.secretaryAction==='ESCALATE'?'لم يستجب المتابع بعد طلبي تقييم':'انتهى موعد التصحيح، ويلزم التحقق من الاستجابة'
+      route:x.pausePending?`/workspace/projects/${x.project.project_id}?action=pause`:'/workspace/projects?tab=supervision',
+      date:x.clock?.next_due_at||x.project.target_due_at||null,
+      priority:0,text:x.pausePending?'طلب توقف مؤقت ينتظر قرارك':x.lateChecks?`تأخر التحقق الإشرافي للمشرف: ${x.supervisorName}`:x.openActions.some(a=>new Date(a.due_at).getTime()<Date.now())?'توجيه إشرافي انتهت مهلته دون تحقق':`${x.lateReports} إفادات مسؤول متأخرة`
      })));
     }catch{failed.push('متابعة الإشراف');setMonitorFocus([])}
    }else setMonitorFocus([]);

@@ -17,12 +17,35 @@ Deno.serve(async(req)=>{if(req.method==='OPTIONS')return new Response('ok',{head
  const jobs=[...(documentJobs||[]),...otherJobs];
  for(const job of jobs){const lockTime=new Date().toISOString();const locked=await db.from('background_jobs').update({status:'PROCESSING',locked_at:lockTime,heartbeat_at:lockTime,attempts:job.attempts+1}).eq('id',job.id).eq('status','PENDING').select('id').maybeSingle();if(!locked.data)continue;try{if(documentTypes.includes(job.job_type))await invoke('document-job',job.payload);else if(job.job_type==='TELEGRAM_NOTIFY')await invoke('telegram-notify',{event:job.payload.event,entity_type:job.entity_type,entity_id:job.entity_id,payload:job.payload});await db.from('background_jobs').update({status:'DONE',completed_at:new Date().toISOString(),heartbeat_at:new Date().toISOString()}).eq('id',job.id)}catch(e:any){const attempts=job.attempts+1;await db.from('background_jobs').update({status:attempts>=5?'FAILED':'PENDING',locked_at:null,heartbeat_at:null,last_error:e?.message||String(e),run_after:new Date(nowMs+Math.min(attempts*2,10)*60000).toISOString()}).eq('id',job.id)}}
 
+ // v6.5 mandatory clocks: 24h responsible updates per active milestone, 12h verification per project.
+ // Reminder throttling prevents hourly cron calls from flooding accounts.
+ const today=new Intl.DateTimeFormat('sv-SE',{timeZone:'Africa/Khartoum'}).format(now);
+ const {data:pauseRows}=await db.from('project_execution_pauses').select('initiative_id').eq('status','APPROVED').gte('pause_until_date',today);
+ const pausedIds=new Set((pauseRows||[]).map((x:any)=>x.initiative_id));
+ const {data:reportClocks}=await db.from('milestone_followup_schedules').select('milestone_id,initiative_id,next_due_at').lt('next_due_at',now.toISOString()).limit(300);
+ for(const clock of reportClocks||[]){if(pausedIds.has(clock.initiative_id))continue;
+  const project=(await db.from('initiatives').select('id,title,owner_id,cycle_id,status,lifecycle_state,setup_status,approval_status').eq('id',clock.initiative_id).maybeSingle()).data;
+  const milestone=(await db.from('milestones').select('title,status').eq('id',clock.milestone_id).maybeSingle()).data;
+  if(!project||project.cycle_id!==currentCycleId||project.setup_status!=='ACTIVE'||project.approval_status!=='APPROVED'||['COMPLETED','CANCELLED'].includes(project.status)||project.lifecycle_state==='POSTPONED'||!milestone||['VERIFIED','CANCELLED','READY_FOR_VERIFICATION'].includes(milestone.status)||!project.owner_id)continue;
+  const event='KMSA_V65_RESPONSIBLE_CHECKIN';if(await recently(db,event,'MILESTONE',clock.milestone_id,23))continue;
+  const delivered=await inboxNotify(db,project.owner_id,event,`مشروع ${project.title}: حان موعد الإفادة اليومية`, `المحطة: ${milestone.title}. سجل ما حدث ولو لم يوجد تقدم، أو أوضح العائق.`, 'MILESTONE',clock.milestone_id,`/workspace/projects/${project.id}?milestone=${clock.milestone_id}&action=update`);
+  if(delivered)await db.from('notification_log').insert({channel:'SYSTEM',recipient:project.owner_id,event_type:event,entity_type:'MILESTONE',entity_id:clock.milestone_id,status:'SENT'});
+ }
+ const {data:supervisorClocks}=await db.from('project_supervision_schedule').select('initiative_id,supervisor_id,next_due_at').lt('next_due_at',now.toISOString()).limit(300);
+ for(const clock of supervisorClocks||[]){if(pausedIds.has(clock.initiative_id))continue;
+  const project=(await db.from('initiatives').select('id,title,secretary_id,cycle_id,status,lifecycle_state,setup_status,approval_status').eq('id',clock.initiative_id).maybeSingle()).data;
+  if(!project||project.cycle_id!==currentCycleId||project.setup_status!=='ACTIVE'||project.approval_status!=='APPROVED'||['COMPLETED','CANCELLED'].includes(project.status)||project.lifecycle_state==='POSTPONED')continue;
+  const event='KMSA_V65_SUPERVISOR_CHECK';if(await recently(db,event,'INITIATIVE',project.id,11))continue;
+  const delivered=await inboxNotify(db,clock.supervisor_id,event,`مشروع ${project.title}: مطلوب تحقق إشرافي`, 'مرّت 12 ساعة منذ موعد التحقق. تواصل أو راجع مخرجات العمل، ثم سجل ما ثبت لديك دون انتظار إفادة المسؤول.', 'INITIATIVE',project.id,`/workspace/projects/${project.id}?action=verify`);
+  if(delivered)await db.from('notification_log').insert({channel:'SYSTEM',recipient:clock.supervisor_id,event_type:event,entity_type:'INITIATIVE',entity_id:project.id,status:'SENT'});
+ }
+
  // Requests are proportional to the milestone duration, not a daily/weekly reporting obligation.
  // A reminder is not a finding of negligence; no supervisor approval blocks execution.
  const dueSoon=72*3600000;
  const {data:ms}=await db.from('milestones').select('*,result:results(initiative_id,initiative:initiatives(id,title,cycle_id,owner_id,secretary_id,setup_status,approval_status,status,lifecycle_state,assignment_start_at))').not('status','in','("VERIFIED","CANCELLED","READY_FOR_VERIFICATION")');
  for(const m of ms||[]){
-  const project=m.result?.initiative;if(!project||project.cycle_id!==currentCycleId||project.setup_status!=='ACTIVE'||project.approval_status!=='APPROVED'||['COMPLETED','CANCELLED'].includes(project.status)||project.lifecycle_state==='POSTPONED')continue;
+  const project=m.result?.initiative;if(!project||pausedIds.has(project.id)||project.cycle_id!==currentCycleId||project.setup_status!=='ACTIVE'||project.approval_status!=='APPROVED'||['COMPLETED','CANCELLED'].includes(project.status)||project.lifecycle_state==='POSTPONED')continue;
   // Relative milestones start after their predecessor finishes; its earlier planned date is only a forecast.
   if(m.deadline_mode==='RELATIVE'&&m.relative_to_milestone_id){const previous=(await db.from('milestones').select('completed_reported_at').eq('id',m.relative_to_milestone_id).maybeSingle()).data;if(!previous?.completed_reported_at)continue;}
   const due=new Date(m.due_at).getTime();let created=Math.max(new Date(m.created_at).getTime(),project.assignment_start_at?new Date(project.assignment_start_at).getTime():0);
@@ -58,7 +81,7 @@ Deno.serve(async(req)=>{if(req.method==='OPTIONS')return new Response('ok',{head
  for(const delegation of delegations||[]){
   const projectQ=await db.from('initiatives').select('id,title,cycle_id,secretary_id,status,lifecycle_state,approval_status').eq('id',delegation.initiative_id).maybeSingle();
   const project=projectQ.data;
-  if(!project||project.cycle_id!==currentCycleId||!project.secretary_id||project.secretary_id===delegation.supervisor_id||project.approval_status!=='APPROVED'||['COMPLETED','CANCELLED'].includes(project.status)||project.lifecycle_state==='POSTPONED')continue;
+  if(!project||pausedIds.has(project.id)||project.cycle_id!==currentCycleId||!project.secretary_id||project.secretary_id===delegation.supervisor_id||project.approval_status!=='APPROVED'||['COMPLETED','CANCELLED'].includes(project.status)||project.lifecycle_state==='POSTPONED')continue;
   // Only latest update per milestone. Otherwise stale revisions generate false alarms.
   const recentQ=await db.from('project_activity_entries').select('id,milestone_id,created_at,note').eq('initiative_id',project.id).eq('kind','MILESTONE_UPDATE').gte('created_at',new Date(nowMs-30*86400000).toISOString()).order('created_at',{ascending:false}).limit(100);
   if(recentQ.error){console.error('delegated updates',recentQ.error);continue;}
@@ -85,7 +108,7 @@ Deno.serve(async(req)=>{if(req.method==='OPTIONS')return new Response('ok',{head
 
  const {data:projects}=await db.from('initiatives').select('*').eq('cycle_id',currentCycleId).eq('setup_status','ACTIVE').not('status','in','("COMPLETED","CANCELLED")');
  for(const project of projects||[]){
-  if(project.lifecycle_state==='POSTPONED')continue;
+  if(project.lifecycle_state==='POSTPONED'||pausedIds.has(project.id))continue;
   const due=project.target_due_at?new Date(project.target_due_at).getTime():null;
   if(due&&due<nowMs)await queueSystemNotice(db,'PROJECT_EARLY_WARNING','INITIATIVE',project.id,'SECRETARY');
  }

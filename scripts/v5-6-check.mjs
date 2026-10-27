@@ -11,6 +11,7 @@ const project=get('apps/web/src/pages/WorkspaceProjectPage.tsx');
 const projects=get('apps/web/src/pages/WorkspaceProjectsPage.tsx');
 const desk=get('apps/web/src/pages/WorkspaceSupervisionPage.tsx');
 const followup=get('apps/web/src/lib/projectFollowup.ts');
+const overview=get('apps/web/src/lib/supervisionOverview.ts');
 const api=get('apps/web/src/lib/api.ts');
 const shell=get('apps/web/src/components/AppShell.tsx');
 const tests=[
@@ -26,7 +27,7 @@ const tests=[
  ['Pause requires an explicit future follow-up date',()=>workflow.includes("type==='POSTPONED'&&(!postponeDate")],
  ['Resuming postponed projects has an explicit workflow action',()=>workflow.includes("actionName==='PROJECT_RESUME'")],
  ['Execution is stopped while postponed',()=>workflow.includes("init.lifecycle_state==='POSTPONED'" )],
- ['Project includes a leading milestone card and full sheet',()=>project.includes('v56-focus-card')&&project.includes('v54-sheet')],
+ ['Project includes a leading milestone card and full sheet',()=>project.includes('v65-execution-overview')&&project.includes('v54-sheet')],
  ['Project top has assignment and closure actions',()=>project.includes('assignment-manage')&&project.includes('closure-request')],
  ['Owner transfer may be made by assigned direct supervisor',()=>workflow.includes("actionName==='PROJECT_OWNER_REASSIGN'")&&workflow.includes('await canFollowProject')],
  ['Only secretary may delegate/reassign direct supervision',()=>workflow.includes("تغيير المتابع المباشر من اختصاص السكرتير فقط")],
@@ -34,7 +35,7 @@ const tests=[
  ['Delegation reassignment preserves previous supervisor in audit',()=>workflow.includes('previous_supervisor_id:oldSupervisor')],
  ['Delegated old updates are not wrongly attributed to new supervisor',()=>monitor.includes('delegation.assigned_at')&&followup.includes('const accountable=!!activity')&&followup.includes('a?.assigned_at')],
  ['Secretary has explicit follow-through action with due time',()=>workflow.includes("actionName==='PROJECT_SUPERVISION_FOLLOWUP'")&&workflow.includes('followup_due_at:due')],
- ['Follow-ups never erase pending review automatically',()=>followup.includes("else if(activity&&!review)")&&followup.includes("issue=resultReady?'RESULT_REVIEW':'UNREVIEWED'")&&desk.includes('لا يعتبر الطلب تقييمًا')],
+ ['Follow-ups never erase pending review automatically',()=>followup.includes("else if(activity&&!review)")&&desk.includes('تحققًا فعليًا')],
  ['Monitoring escalates overdue follow-through to secretary',()=>monitor.includes('DELEGATED_REVIEW_REQUEST_SECOND')&&monitor.includes('DELEGATED_REVIEW_ESCALATION')],
  ['Postponed projects do not produce false active-work reminders',()=>monitor.includes("project.lifecycle_state==='POSTPONED'")],
  ['Projects and delegated supervision share one section',()=>projects.includes('WorkspaceSupervisionPage')&&projects.includes('v57-project-tabs')],

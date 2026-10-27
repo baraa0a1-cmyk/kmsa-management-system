@@ -77,7 +77,7 @@ export async function workspaceProjects(): Promise<Initiative[]> {
 export async function workspaceProject(id:string): Promise<ProjectBundle> {
   // First locate this project's results; then load only its milestones/evidence.
   // A secretary must not download the association's entire activity ledger to open one project.
-  const [i,r,u,p,pi,o,a,sv,se,dr,cr,sf,fs]=await Promise.all([
+  const [i,r,u,p,pi,o,a,sv,se,dr,cr,sf,fs,chk,act,pause,clock,req]=await Promise.all([
     supabase.from('initiatives').select('*,secretariat:secretariats(*),owner:profiles!initiatives_owner_id_fkey(id,full_name),secretary:profiles!initiatives_secretary_id_fkey(id,full_name)').eq('id',id).single(),
     supabase.from('results').select('*,owner:profiles!results_owner_id_fkey(id,full_name)').eq('initiative_id',id).order('created_at'),
     supabase.from('project_updates').select('*,author:profiles(full_name)').eq('initiative_id',id).order('created_at',{ascending:false}),
@@ -90,9 +90,14 @@ export async function workspaceProject(id:string): Promise<ProjectBundle> {
     supabase.from('milestone_deadline_requests').select('*').eq('initiative_id',id).order('created_at',{ascending:false}),
     supabase.from('project_closure_requests').select('*').eq('initiative_id',id).order('requested_at',{ascending:false}),
     supabase.from('project_supervision_followups').select('*').eq('initiative_id',id).order('created_at',{ascending:false}),
-    supabase.from('milestone_followup_schedules').select('milestone_id,initiative_id,interval_hours,next_due_at,last_report_at').eq('initiative_id',id)
+    supabase.from('milestone_followup_schedules').select('milestone_id,initiative_id,interval_hours,next_due_at,last_report_at').eq('initiative_id',id),
+    supabase.from('project_supervision_checks').select('*').eq('initiative_id',id).order('created_at',{ascending:false}),
+    supabase.from('project_supervision_actions').select('*').eq('initiative_id',id).order('created_at',{ascending:false}),
+    supabase.from('project_execution_pauses').select('*').eq('initiative_id',id).order('created_at',{ascending:false}),
+    supabase.from('project_supervision_schedule').select('*').eq('initiative_id',id).maybeSingle(),
+    supabase.from('project_supervision_requests').select('*').eq('initiative_id',id).order('created_at',{ascending:false})
   ]);
-  for(const x of [i,r,u,p,pi,o,a,sv,se,dr,cr,sf,fs]) if(x.error)throw x.error;
+  for(const x of [i,r,u,p,pi,o,a,sv,se,dr,cr,sf,fs,chk,act,pause,clock,req]) if(x.error)throw x.error;
   const resultIds=(r.data||[]).map((x:any)=>x.id);
   const m=resultIds.length?await supabase.from('milestones').select('*,owner:profiles!milestones_owner_id_fkey(id,full_name),result:results(*)').in('result_id',resultIds).order('sequence_no').order('due_at'):{data:[],error:null};
   if(m.error)throw m.error;
@@ -102,7 +107,7 @@ export async function workspaceProject(id:string): Promise<ProjectBundle> {
     milestoneIds.length?supabase.from('milestone_evidence').select('*').in('milestone_id',milestoneIds).order('created_at',{ascending:false}):Promise.resolve({data:[],error:null})
   ]);
   if(b.error)throw b.error;if(e.error)throw e.error;
-  return {followupSchedules:(fs.data||[]) as any[],initiative:i.data as Initiative,results:(r.data||[]) as ResultItem[],milestones:(m.data||[]) as Milestone[],updates:(u.data||[]) as ProjectUpdate[],permissions:(p.data||[]) as ProjectPermission[],interventions:(pi.data||[]) as ProjectIntervention[],blockers:(b.data||[]) as Blocker[],oversight:o.data||[],activity:a.data||[],evidence:(e.data||[]) as Evidence[], supervisor:sv.data||null, supervisionEvents:se.data||[], deadlineRequests:dr.data||[], closureRequests:cr.data||[], supervisionFollowups:sf.data||[]};
+  return {supervisionChecks:(chk.data||[]) as any[],supervisionActions:(act.data||[]) as any[],executionPauses:(pause.data||[]) as any[],supervisionClock:clock.data||null,supervisionRequests:(req.data||[]) as any[],followupSchedules:(fs.data||[]) as any[],initiative:i.data as Initiative,results:(r.data||[]) as ResultItem[],milestones:(m.data||[]) as Milestone[],updates:(u.data||[]) as ProjectUpdate[],permissions:(p.data||[]) as ProjectPermission[],interventions:(pi.data||[]) as ProjectIntervention[],blockers:(b.data||[]) as Blocker[],oversight:o.data||[],activity:a.data||[],evidence:(e.data||[]) as Evidence[], supervisor:sv.data||null, supervisionEvents:se.data||[], deadlineRequests:dr.data||[], closureRequests:cr.data||[], supervisionFollowups:sf.data||[]};
 }
 export async function projectPermissionsPending(): Promise<(ProjectPermissionApproval & {permission:ProjectPermission})[]> {
   const {data,error}=await supabase.rpc('permission_approval_queue');if(error)throw error;return (data||[]) as any;

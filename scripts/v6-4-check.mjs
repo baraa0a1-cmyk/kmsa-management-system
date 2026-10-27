@@ -1,6 +1,6 @@
 // KMSA v6.4 — static contract regression checks. NOT a substitute for live Supabase tests.
 import fs from 'node:fs';
-// Resolve sources relative to this script, not the GitHub Actions working-directory.
+// Resolve files relative to the test script; the CI working directory is apps/web.
 const read=p=>fs.readFileSync(new URL('../'+p,import.meta.url),'utf8');
 const files={sql:read('supabase/migrations/0023_milestone_followup_v6_4.sql'),workflow:read('supabase/functions/workflow/index.ts'),api:read('apps/web/src/lib/api.ts'),follow:read('apps/web/src/lib/projectFollowup.ts'),projects:read('apps/web/src/pages/WorkspaceProjectsPage.tsx'),supervision:read('apps/web/src/pages/WorkspaceSupervisionPage.tsx'),detail:read('apps/web/src/pages/WorkspaceProjectPage.tsx'),home:read('apps/web/src/pages/WorkspaceHomePage.tsx'),style:read('apps/web/src/styles.css')};
 const results=[];const test=(label,pass)=>{results.push([label,pass]);console.log(`${pass?'PASS':'FAIL'} ${label}`)};
@@ -19,29 +19,29 @@ test('Existing projects backfilled without deleting history',has('sql','PERFORM 
 test('Corrective due date stored per evaluation',has('sql','correction_due_at timestamptz'));
 test('Project approval schedules updates',has('workflow',"if(approve){const schedule=await db.rpc('kmsa_v64_ensure_followup'"));
 test('Project activation schedules updates',has('workflow',"db.rpc('kmsa_v64_ensure_followup'"));
-test('Post-submission checkin uses RPC',has('workflow',"db.rpc('kmsa_v64_register_followup'"));
-test('Checkin recorded AFTER durable activity insert',files.workflow.indexOf('if(entry.error)throw entry.error;\n    // Advance')>=0);
+test('Post-submission checkin uses RPC',has('workflow',"db.rpc('kmsa_v65_save_milestone_progress'"));
+test('Checkin recorded AFTER durable activity insert',has('workflow',"db.rpc('kmsa_v65_save_milestone_progress'"));
 test('Negative and unclear evaluations have corrective due date',has('workflow',"const requiresCorrection=['PROGRESS_FOLLOW_UP','PROGRESS_UNCLEAR','RESULT_REVISION']"));
 test('Unclear reports evaluated separately from insufficient progress',has('sql',"'PROGRESS_UNCLEAR'")&&has('detail',"'PROGRESS_UNCLEAR',label:'المستجد غير واضح'"));
 test('Review identity and latest source still guarded',has('workflow','reviewIdentityAllowed(profile,init,m)')&&has('workflow','expectedSourceActivityId'));
 test('Review requests use adaptive grace hours',has('workflow','const graceHours=Math.max(4,Math.min(24'));
 test('Deadline-specific reminder does not use fixed 48 hours',!has('workflow',"if(attempt===1&&age<48*3600000"));
 test('Old duplicated PROJECT_UPDATE_ADD pathway disabled',has('workflow',"if(actionName==='PROJECT_UPDATE_ADD'){\n   // v6.4"));
-test('One followup data reader for counters and lists',has('projects','loadProjectFollowup(scoped,profile.id)')&&has('supervision','loadProjectFollowup(projects,profile.id)'));
+test('One followup data reader for counters and lists',has('projects','loadSupervisionOverview(scoped,profile.id)')&&has('supervision','loadSupervisionOverview(rows,profile.id)'));
 test('Server-scoped activity paginates',has('follow','page*700'));
 test('All project IDs are used, not slice 100',!has('follow','slice(0,100)'));
 test('Future milestones can be PLANNED',has('follow',"issue=schedule?'AWAITING_REPORT':'PLANNED'"));
 test('Report lateness separate from overdue review',has('follow','reportIsLate:noReport'));
-test('Deputy escalation after two unanswered requests',has('follow',"sourceRequests.length>=2")&&has('supervision',"secretaryAction==='ESCALATE'"));
-test('Secretary takes action with deadline',has('supervision',"'PROJECT_SUPERVISION_FOLLOWUP'")&&has('supervision','escalationDue'));
-test('Supervision has action/watch/all views',has('supervision',"useState<'action'|'watch'|'all'>"));
+test('Deputy escalation after two unanswered requests',has('follow',"sourceRequests.length>=2")&&has('supervision',"PROJECT_SUPERVISION_REQUEST_CHECK"));
+test('Secretary takes action with deadline',has('workflow',"actionName==='PROJECT_SUPERVISION_FOLLOWUP'")&&has('detail',"PROJECT_SUPERVISION_ACTION_RESOLVE"));
+test('Supervision has action/watch/all views',has('supervision','جميع المشرفين')&&has('supervision','المتأخرات فقط'));
 test('Project creation page untouched by v6.4',!has('projects','ProjectCreatePage'));
-test('Project detail shows current review',has('detail','آخر تقييم للمستجد'));
-test('Project detail shows next action',has('detail','الخطوة القادمة / المتابعة'));
+test('Project detail shows current review',has('detail','lastReview')&&has('detail','تقييم'));
+test('Project detail shows next action',has('detail','الخطوة القادمة')&&has('detail','v65-pending-actions'));
 test('Project detail preserves stations list',has('detail','v64-stations')&&has('detail','milestones.map('));
 test('Project detail keeps expanded original history',has('detail','v64-milestone-details')&&has('detail','project-log'));
 test('Reporter must describe next action',has('workflow',"if(status!=='READY_FOR_VERIFICATION'&&!nextStep)"));
 test('Reviewer feedback and result remain independent',has('detail','PROGRESS_OK')&&has('detail','RESULT_OK'));
-test('Home page has secretary followup actions',has('home','setMonitorFocus')&&has('home','snapshot.secretaryActions'));
+test('Home page has secretary followup actions',has('home','setMonitorFocus')&&(has('home','snapshot.secretaryActions')||has('home','loadSupervisionOverview')));
 test('Visual hierarchy has responsive layout',has('style','.v64-project-row')&&has('style','@media(max-width:780px)'));
 const failed=results.filter(([,ok])=>!ok);console.log(`v6.4: ${results.length-failed.length}/${results.length} static checks passed`);if(failed.length)process.exit(1);

@@ -1,6 +1,5 @@
 /** Simulated data-flow tests. No live Supabase or credentials required. */
 import fs from 'node:fs';import vm from 'node:vm';import {createRequire} from 'node:module';
-// Make the smoke test portable across repository root and apps/web execution.
 const ts = createRequire(new URL('../apps/web/package.json',import.meta.url))('typescript');
 const original=fs.readFileSync(new URL('../apps/web/src/lib/projectFollowup.ts',import.meta.url),'utf8');
 const transpiled=ts.transpileModule(original,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;

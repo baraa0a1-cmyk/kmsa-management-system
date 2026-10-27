@@ -57,10 +57,12 @@ jobs:
         run: node ../../scripts/v6-2-check.mjs
       - name: Verify v6.3 office role and unassigned cohort safeguards
         run: node ../../scripts/v6-3-check.mjs
-      - name: Verify v6.4 followup and supervision safeguards
+      - name: Verify v6.4 review ledger compatibility
         run: node ../../scripts/v6-4-check.mjs
-      - name: Verify v6.4 followup behavior (simulated database)
+      - name: Verify v6.4 review flow simulation
         run: node ../../scripts/v6-4-flow-smoke.mjs
+      - name: Verify v6.5 independent supervision and pause safety
+        run: node ../../scripts/v6-5-check.mjs
       - name: Build
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}

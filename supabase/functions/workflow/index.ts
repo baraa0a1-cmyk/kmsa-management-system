@@ -66,6 +66,11 @@ async function getResult(db:any,id:string){const {data,error}=await db.from('res
 function canSuperviseProject(profile:any,initiative:any){return initiative.secretary_id===profile.id||(profile.role==='SECRETARY'&&profile.secretariat_id===initiative.secretariat_id)}
 function isProjectLead(profile:any,initiative:any,result?:any){return initiative.owner_id===profile.id||result?.owner_id===profile.id}
 
+async function isExecutionPaused(db:any,initiativeId:string){
+ const today=new Intl.DateTimeFormat('sv-SE',{timeZone:'Africa/Khartoum'}).format(new Date());
+ const {data,error}=await db.from('project_execution_pauses').select('id').eq('initiative_id',initiativeId).eq('status','APPROVED').gte('pause_until_date',today).limit(1);
+ if(error)throw error;return (data||[]).length>0;
+}
 async function computedProjectHealth(db:any,initiativeId:string){
  const results=await db.from('results').select('id').eq('initiative_id',initiativeId);if(results.error)throw results.error;
  const ids=(results.data||[]).map((x:any)=>x.id);if(!ids.length)return 'ON_TRACK';
@@ -506,8 +511,92 @@ Deno.serve(async(req)=>{
    if(!(profile.role==='ADMIN'||(profile.role==='SECRETARY'&&init.secretary_id===profile.id)))throw new Error('استئناف المشروع من اختصاص السكرتير.');
    if(init.lifecycle_state!=='POSTPONED')throw new Error('المشروع ليس مؤجلًا.');
    const u=await db.from('initiatives').update({lifecycle_state:'ACTIVE',resume_review_at:null,lifecycle_decided_at:new Date().toISOString(),lifecycle_decided_by:profile.id}).eq('id',init.id).eq('lifecycle_state','POSTPONED');if(u.error)throw u.error;
-   {const schedule=await db.rpc('kmsa_v64_ensure_followup',{p_initiative:init.id});if(schedule.error)throw schedule.error;}
+   {const schedule=await db.rpc('kmsa_v64_ensure_followup',{p_initiative:init.id});if(schedule.error)throw schedule.error;const verify=await db.rpc('kmsa_v65_ensure_supervision',{p_initiative:init.id});if(verify.error)throw verify.error;}
    await projectLedger(db,profile,init.id,'PROJECT_CHANGE','استئناف المشروع بعد تأجيله',null,{previous_state:'POSTPONED'});
+   return json({ok:true});
+  }
+
+  // v6.5 — Independent supervision verification: works even without ANY report from the responsible person.
+  if(actionName==='PROJECT_SUPERVISION_CHECK_ADD'){
+   const init=await getInitiative(db,payload.initiativeId);
+   if(init.approval_status!=='APPROVED'||init.setup_status!=='ACTIVE'||['COMPLETED','CANCELLED'].includes(init.status)||init.lifecycle_state==='POSTPONED')throw new Error('المشروع ليس قيد التنفيذ.');
+   const activePause=(await db.from('project_execution_pauses').select('id').eq('initiative_id',init.id).eq('status','APPROVED').gte('pause_until_date',new Intl.DateTimeFormat('sv-SE',{timeZone:'Africa/Khartoum'}).format(new Date())).limit(1)).data||[];
+   if(activePause.length)throw new Error('المشروع متوقف مؤقتًا؛ لا تُطلب إفادات أو متابعة أثناء الإيقاف.');
+   if(!await canFollowProject(db,profile,init))throw new Error('التأكد من التنفيذ من صلاحيات المتابع المعين أو السكرتير.');
+   if(profile.id===init.owner_id&&!(profile.role==='SECRETARY'&&init.secretary_id===profile.id))throw new Error('لا يمكن للمسؤول مراجعة عمله؛ يمكن للسكرتير مراجعة عمله بنفسه.');
+   const finding=String(payload.finding||'');const method=String(payload.method||'TELEGRAM');const note=String(payload.note||'').trim();const nextStep=String(payload.nextStep||'').trim();const due=isoDate(payload.followupDueAt);
+   if(!['ON_TRACK','SLOW','NO_WORK','BLOCKED','UNVERIFIED'].includes(finding)||!['TELEGRAM','OUTPUT','OTHER'].includes(method))throw new Error('حدد نتيجة التحقق وطريقته.');
+   if(note.length<8)throw new Error('صف باختصار ما تحققت منه، لا مجرد علامة الاطلاع.');
+   if(finding!=='ON_TRACK'&&(!nextStep||!due||new Date(due).getTime()<=Date.now()))throw new Error('حدد ما اتُّفق عليه وموعد مراجعة الاستجابة.');
+   // Optional scope: only the project's active milestones; one project-level check covers all or some.
+   const resultIds=((await db.from('results').select('id').eq('initiative_id',init.id)).data||[]).map((x:any)=>x.id);
+   const activeMs=resultIds.length?((await db.from('milestones').select('id').in('result_id',resultIds).neq('design_status','REJECTED').in('status',['IN_PROGRESS','AT_RISK','BLOCKED','NOT_STARTED'])).data||[]):[];
+   const valid=new Set(activeMs.map((x:any)=>x.id));const selected=Array.isArray(payload.milestoneIds)?payload.milestoneIds:[];
+   if(selected.some((x:string)=>!valid.has(x)))throw new Error('إحدى المحطات المختارة ليست من محطات المشروع النشطة.');
+   const supervisor=(await db.from('project_supervision_schedule').select('supervisor_id').eq('initiative_id',init.id).maybeSingle()).data?.supervisor_id;
+   const result=await db.from('project_supervision_checks').insert({initiative_id:init.id,supervisor_id:profile.id,finding,verification_method:method,note,next_step:nextStep||null,followup_due_at:finding==='ON_TRACK'?null:due,milestone_ids:selected}).select().single();if(result.error)throw result.error;
+   if(finding!=='ON_TRACK'){const a=await db.from('project_supervision_actions').insert({initiative_id:init.id,source_check_id:result.data.id,requirement:nextStep,assigned_to:init.owner_id,due_at:due}).select().single();if(a.error)throw a.error;}
+   // A secretary who intervenes may verify directly. It never counts as the deputy's own 12h check.
+   if(supervisor===profile.id){const x=await db.rpc('kmsa_v65_register_check',{p_project:init.id,p_supervisor:profile.id,p_checked_at:result.data.created_at});if(x.error)throw x.error;}
+   if(finding!=='ON_TRACK'&&init.owner_id){await inboxNotify(db,init.owner_id,'SUPERVISION_CHECK',`مشروع ${init.title}: متابعة تنفيذ`,`${note} · الخطوة المطلوبة: ${nextStep}`,'INITIATIVE',init.id,`/workspace/projects/${init.id}`);}
+   await audit(db,profile,'PROJECT_SUPERVISION_CHECK_ADD','INITIATIVE',init.id,null,result.data);
+   return json({ok:true,check:result.data});
+  }
+  if(actionName==='PROJECT_SUPERVISION_ACTION_RESOLVE'){
+   const record=(await db.from('project_supervision_actions').select('*').eq('id',payload.actionId).single()).data;
+   if(!record||record.status!=='OPEN')throw new Error('هذا التوجيه غير مفتوح.');
+   const init=await getInitiative(db,record.initiative_id);if(await isExecutionPaused(db,init.id))throw new Error('المشروع متوقف مؤقتًا؛ تتحقق من التوجيه عند الاستئناف.');
+   if(!await canFollowProject(db,profile,init)||profile.id===init.owner_id&&init.secretary_id!==profile.id)throw new Error('إغلاق المتابعة يكون بتأكد المتابع لا بإفادة المسؤول وحدها.');
+   const note=String(payload.note||'').trim();if(note.length<8)throw new Error('وضح ما تحقق بالفعل بعد التواصل أو المراجعة.');
+   const updated=await db.from('project_supervision_actions').update({status:'RESOLVED',resolved_at:new Date().toISOString(),resolved_by:profile.id,resolution_note:note}).eq('id',record.id).eq('status','OPEN').select().single();if(updated.error)throw updated.error;
+   await audit(db,profile,'PROJECT_SUPERVISION_ACTION_RESOLVE','INITIATIVE',init.id,record,updated.data);return json({ok:true});
+  }
+  if(actionName==='PROJECT_SUPERVISION_REQUEST_CHECK'){
+   const init=await getInitiative(db,payload.initiativeId);
+   if(!(profile.role==='ADMIN'||(profile.role==='SECRETARY'&&init.secretary_id===profile.id)))throw new Error('الطلب من اختصاص السكرتير.');
+   const schedule=(await db.from('project_supervision_schedule').select('*').eq('initiative_id',init.id).maybeSingle()).data;
+   if(!schedule||schedule.supervisor_id===profile.id)throw new Error('لا يوجد متابع مفوض لمطالبته.');
+   const outstanding=(await db.from('project_supervision_requests').select('created_at,due_at').eq('initiative_id',init.id).eq('supervisor_id',schedule.supervisor_id).order('created_at',{ascending:false}).limit(1)).data||[];
+   if(outstanding.length&&new Date(outstanding[0].due_at).getTime()>Date.now())throw new Error('طلب المتابعة السابق ما زال في مهلة الاستجابة.');
+   const note=String(payload.note||'').trim();const due=new Date(Date.now()+6*3600000).toISOString();
+   const added=await db.from('project_supervision_requests').insert({initiative_id:init.id,requested_by:profile.id,supervisor_id:schedule.supervisor_id,due_at:due,note:note||null}).select().single();if(added.error)throw added.error;
+   await inboxNotify(db,schedule.supervisor_id,'REQUEST_SUPERVISION_CHECK',`مشروع ${init.title}: مطلوب تحقق إشرافي`,`${note||'انتهى موعد التحقق الدوري.'} · الرجاء تسجيل ما تحققت منه عبر صفحة المشروع.`,'INITIATIVE',init.id,`/workspace/projects/${init.id}`);
+   return json({ok:true,request:added.data});
+  }
+  if(actionName==='PROJECT_PAUSE_REQUEST'){
+   const init=await getInitiative(db,payload.initiativeId);
+   if(init.approval_status!=='APPROVED'||init.setup_status!=='ACTIVE'||['COMPLETED','CANCELLED'].includes(init.status)||init.lifecycle_state==='POSTPONED')throw new Error('لا يمكن طلب إيقاف مؤقت لهذا المشروع.');
+   if(!isProjectLead(profile,init)&&!await canFollowProject(db,profile,init))throw new Error('الطلب من المسؤول أو المشرف.');
+   const category=String(payload.category||'');const explanation=String(payload.explanation||'').trim();const until=String(payload.untilDate||'');
+   if(!['EXAMS','PRIORITY','OTHER'].includes(category)||explanation.length<12||!/^\d{4}-\d{2}-\d{2}$/.test(until))throw new Error('حدد سبب الإيقاف وتاريخ العودة بصورة واضحة.');
+   const current=new Intl.DateTimeFormat('sv-SE',{timeZone:'Africa/Khartoum'}).format(new Date());
+   const daySpan=Math.round((Date.parse(until+'T00:00:00Z')-Date.parse(current+'T00:00:00Z'))/86400000)+1;
+   if(!Number.isFinite(daySpan)||daySpan<1||daySpan>30)throw new Error('الإيقاف المؤقت بين يوم و30 يومًا؛ للتأجيل الأطول استخدم قرارات المشروع.');
+   const already=(await db.from('project_execution_pauses').select('id').eq('initiative_id',init.id).eq('status','APPROVED').gte('pause_until_date',current).limit(1)).data||[];
+   if(already.length)throw new Error('المشروع متوقف بالفعل.');
+   const row=await db.from('project_execution_pauses').insert({initiative_id:init.id,requested_by:profile.id,category,explanation,pause_until_date:until}).select().single();if(row.error)throw row.error;
+   if(profile.id===init.secretary_id&&profile.role==='SECRETARY'){
+    const dec=await db.rpc('kmsa_v65_decide_pause',{p_id:row.data.id,p_actor:profile.id,p_accept:true,p_note:'اعتماد السكرتير مباشرة'});if(dec.error)throw dec.error;
+    return json({ok:true,approved:true});
+   }
+   if(init.secretary_id)await inboxNotify(db,init.secretary_id,'PROJECT_PAUSE_PENDING',`مشروع ${init.title}: طلب توقف مؤقت`,`${explanation} · يعود العمل بعد ${until}`,'INITIATIVE',init.id,`/workspace/projects/${init.id}`);
+   return json({ok:true,request:row.data});
+  }
+  if(actionName==='PROJECT_PAUSE_DECIDE'){
+   const item=(await db.from('project_execution_pauses').select('*').eq('id',payload.pauseId).single()).data;
+   if(!item||item.status!=='PENDING')throw new Error('طلب التوقف لم يعد مفتوحًا.');
+   const init=await getInitiative(db,item.initiative_id);
+   if(!(profile.role==='ADMIN'||(profile.role==='SECRETARY'&&init.secretary_id===profile.id)))throw new Error('اعتماد الإيقاف المؤقت من صلاحية السكرتير.');
+   const x=await db.rpc('kmsa_v65_decide_pause',{p_id:item.id,p_actor:profile.id,p_accept:payload.approve===true,p_note:String(payload.note||'')});if(x.error)throw x.error;
+   if(item.requested_by!==profile.id)await inboxNotify(db,item.requested_by,'PROJECT_PAUSE_DECIDED',`مشروع ${init.title}: ${payload.approve?'اعتُمد':'رُفض'} طلب التوقف المؤقت`,'راجع حالة المشروع.','INITIATIVE',init.id,`/workspace/projects/${init.id}`);
+   return json({ok:true});
+  }
+  if(actionName==='PROJECT_PAUSE_END'){
+   const item=(await db.from('project_execution_pauses').select('*').eq('id',payload.pauseId).single()).data;
+   if(!item||item.status!=='APPROVED')throw new Error('التوقف المؤقت ليس نشطًا.');
+   const init=await getInitiative(db,item.initiative_id);
+   if(!(profile.role==='ADMIN'||(profile.role==='SECRETARY'&&init.secretary_id===profile.id)))throw new Error('استئناف المشروع من صلاحيات السكرتير.');
+   const end=await db.rpc('kmsa_v65_end_pause',{p_id:item.id,p_actor:profile.id});if(end.error)throw end.error;
    return json({ok:true});
   }
   if(actionName==='PROJECT_SUPERVISION_REQUEST_REVIEW'){
@@ -571,7 +660,7 @@ Deno.serve(async(req)=>{
   }
 
   if(actionName==='PROJECT_GS_DECIDE'){
-   if(!['GS','ADMIN'].includes(profile.role))throw new Error('اعتماد قرار التكليف من اختصاص السكرتير العام.');const init=await getInitiative(db,payload.initiativeId);if(init.approval_status!=='PENDING_GS')throw new Error('المشروع ليس بانتظار اعتماد السكرتير العام.');const result=(await db.from('results').select('*').eq('initiative_id',init.id).limit(1).single()).data;const milestones=(await db.from('milestones').select('*').eq('result_id',result.id).neq('design_status','REJECTED')).data||[];if(!result?.statement||!init.target_due_at||!init.owner_id||!milestones.length)throw new Error('قرار التكليف غير مكتمل: النتيجة والمسؤول والفترة ومحطات الإنجاز مطلوبة.');const approve=payload.decision==='APPROVE';const patch:any=approve?{approval_status:'APPROVED',setup_status:'ACTIVE',status:'ACTIVE',gs_review_note:payload.note||null,gs_approved_by:profile.id,gs_approved_at:new Date().toISOString(),activated_at:new Date().toISOString(),health:'ON_TRACK',next_update_due_at:null}:{approval_status:'RETURNED',setup_status:'AWAITING_GS_APPROVAL',gs_review_note:payload.note||'أعيد للسكرتير لاستكمال قرار التكليف.'};const u=await db.from('initiatives').update(patch).eq('id',init.id).select().single();if(u.error)throw u.error;if(approve){const schedule=await db.rpc('kmsa_v64_ensure_followup',{p_initiative:init.id});if(schedule.error)throw schedule.error;}if(approve&&init.proposal_id)await db.from('proposals').update({execution_status:'IN_PROGRESS'}).eq('id',init.proposal_id);await projectLedger(db,profile,init.id,'GS_DECISION',approve?'اعتماد قرار تكليف المشروع':'إعادة المشروع للمراجعة',null,{note:payload.note||null});await audit(db,profile,approve?'PROJECT_GS_APPROVE':'PROJECT_GS_RETURN','INITIATIVE',init.id,init,u.data,{note:payload.note||null});await queueNotice(db,approve?'PROJECT_ASSIGNED':'PROJECT_RETURNED_TO_SECRETARY','INITIATIVE',init.id,{lead_id:init.owner_id});return json({ok:true,initiative:u.data});
+   if(!['GS','ADMIN'].includes(profile.role))throw new Error('اعتماد قرار التكليف من اختصاص السكرتير العام.');const init=await getInitiative(db,payload.initiativeId);if(init.approval_status!=='PENDING_GS')throw new Error('المشروع ليس بانتظار اعتماد السكرتير العام.');const result=(await db.from('results').select('*').eq('initiative_id',init.id).limit(1).single()).data;const milestones=(await db.from('milestones').select('*').eq('result_id',result.id).neq('design_status','REJECTED')).data||[];if(!result?.statement||!init.target_due_at||!init.owner_id||!milestones.length)throw new Error('قرار التكليف غير مكتمل: النتيجة والمسؤول والفترة ومحطات الإنجاز مطلوبة.');const approve=payload.decision==='APPROVE';const patch:any=approve?{approval_status:'APPROVED',setup_status:'ACTIVE',status:'ACTIVE',gs_review_note:payload.note||null,gs_approved_by:profile.id,gs_approved_at:new Date().toISOString(),activated_at:new Date().toISOString(),health:'ON_TRACK',next_update_due_at:null}:{approval_status:'RETURNED',setup_status:'AWAITING_GS_APPROVAL',gs_review_note:payload.note||'أعيد للسكرتير لاستكمال قرار التكليف.'};const u=await db.from('initiatives').update(patch).eq('id',init.id).select().single();if(u.error)throw u.error;if(approve){const schedule=await db.rpc('kmsa_v64_ensure_followup',{p_initiative:init.id});if(schedule.error)throw schedule.error;const verify=await db.rpc('kmsa_v65_ensure_supervision',{p_initiative:init.id});if(verify.error)throw verify.error;}if(approve&&init.proposal_id)await db.from('proposals').update({execution_status:'IN_PROGRESS'}).eq('id',init.proposal_id);await projectLedger(db,profile,init.id,'GS_DECISION',approve?'اعتماد قرار تكليف المشروع':'إعادة المشروع للمراجعة',null,{note:payload.note||null});await audit(db,profile,approve?'PROJECT_GS_APPROVE':'PROJECT_GS_RETURN','INITIATIVE',init.id,init,u.data,{note:payload.note||null});await queueNotice(db,approve?'PROJECT_ASSIGNED':'PROJECT_RETURNED_TO_SECRETARY','INITIATIVE',init.id,{lead_id:init.owner_id});return json({ok:true,initiative:u.data});
   }
 
   if(['PROJECT_SETUP_CREATE','PROJECT_SETUP_FROM_PROPOSAL','RESULT_ASSIGNMENT_ACCEPT','RESULT_ASSIGNMENT_RETURN','RESULT_ASSIGNMENT_REVISE'].includes(actionName)){
@@ -585,7 +674,7 @@ Deno.serve(async(req)=>{
    if(result.due_at&&new Date(due!)>new Date(result.due_at))throw new Error('موعد محطة الإنجاز لا يمكن أن يتجاوز الموعد النهائي للنتيجة.');
    const existing=(await db.from('milestones').select('sequence_no').eq('result_id',result.id).neq('design_status','REJECTED').order('sequence_no',{ascending:false}).limit(1).maybeSingle()).data;const sequenceNo=Number(existing?.sequence_no||0)+1;const ownerId=result.owner_id||init.owner_id;
    const row={result_id:result.id,secretariat_id:init.secretariat_id,owner_id:ownerId,title,description:payload.description||null,due_at:due,verification_criteria:String(payload.verificationCriteria||'').trim()||'تحقق المخرج المحدد للمحطة',priority:payload.priority||'NORMAL',created_by:profile.id,design_status:'APPROVED',sequence_no:sequenceNo,deadline_mode:mode,relative_days:relativeDays,relative_hours:relativeHours,relative_to_milestone_id:relativeTo,status:'NOT_STARTED',status_updated_at:new Date().toISOString()};
-   const mm=await db.from('milestones').insert(row).select().single();if(mm.error)throw mm.error;if(init.setup_status==='ACTIVE'){const schedule=await db.rpc('kmsa_v64_ensure_followup',{p_initiative:init.id});if(schedule.error)throw schedule.error;}await projectLedger(db,profile,init.id,'DESIGN_CHANGE','إضافة محطة إنجاز: '+title,mm.data.id,{due_at:due});await audit(db,profile,'MILESTONE_DESIGN_ADD','MILESTONE',mm.data.id,null,mm.data,{initiative_id:init.id});return json({ok:true,milestone:mm.data});
+   const mm=await db.from('milestones').insert(row).select().single();if(mm.error)throw mm.error;if(init.setup_status==='ACTIVE'){const schedule=await db.rpc('kmsa_v64_ensure_followup',{p_initiative:init.id});if(schedule.error)throw schedule.error;const verify=await db.rpc('kmsa_v65_ensure_supervision',{p_initiative:init.id});if(verify.error)throw verify.error;}await projectLedger(db,profile,init.id,'DESIGN_CHANGE','إضافة محطة إنجاز: '+title,mm.data.id,{due_at:due});await audit(db,profile,'MILESTONE_DESIGN_ADD','MILESTONE',mm.data.id,null,mm.data,{initiative_id:init.id});return json({ok:true,milestone:mm.data});
   }
 
   if(actionName==='MILESTONE_DESIGN_UPDATE'){
@@ -602,7 +691,7 @@ Deno.serve(async(req)=>{
   if(actionName==='PROJECT_ACTIVATE'){
    const init=await getInitiative(db,payload.initiativeId);if(!canSuperviseProject(profile,init))throw new Error('السكرتير المشرف فقط يفعّل المشروع.');const {data:results}=await db.from('results').select('*').eq('initiative_id',init.id);if(!(results||[]).length)throw new Error('حدد النتيجة أولًا.');if((results||[]).some((r:any)=>!['ACTIVE','ACCEPTED'].includes(r.assignment_status)))await db.from('results').update({assignment_status:'ACTIVE'}).in('id',(results||[]).map((r:any)=>r.id));
    const ids=(results||[]).map((r:any)=>r.id);const {data:ms}=await db.from('milestones').select('*').in('result_id',ids).neq('design_status','REJECTED');if(!(ms||[]).length)throw new Error('اتفقا على محطة إنجاز واحدة على الأقل قبل التفعيل.');for(const m of ms||[]){const r=(results||[]).find((x:any)=>x.id===m.result_id);if(r?.due_at&&new Date(m.due_at)>new Date(r.due_at))throw new Error(`موعد المحطة «${m.title}» بعد موعد النتيجة النهائي.`)}const {count:pendingSpecial}=await db.from('project_permissions').select('*',{count:'exact',head:true}).eq('initiative_id',init.id).eq('permission_type','SPECIAL').eq('status','PENDING');if((pendingSpecial||0)>0)throw new Error('هناك صلاحية خاصة لازمة ما زالت بانتظار الموافقة؛ أكمل مسار الصلاحيات قبل بدء التنفيذ.');
-   await db.from('milestones').update({design_status:'APPROVED'}).in('result_id',ids).neq('design_status','REJECTED');await db.from('results').update({assignment_status:'ACTIVE'}).in('id',ids);const u=await db.from('initiatives').update({status:'ACTIVE',setup_status:'ACTIVE',activated_at:new Date().toISOString(),health:'ON_TRACK',next_update_due_at:null}).eq('id',init.id).select().single();if(u.error)throw u.error;{const schedule=await db.rpc('kmsa_v64_ensure_followup',{p_initiative:init.id});if(schedule.error)throw schedule.error;}if(init.proposal_id)await db.from('proposals').update({execution_status:'IN_PROGRESS'}).eq('id',init.proposal_id);await audit(db,profile,'PROJECT_ACTIVATE','INITIATIVE',init.id,init,u.data);await queueNotice(db,'PROJECT_ACTIVATED','INITIATIVE',init.id);return json({ok:true,initiative:u.data});
+   await db.from('milestones').update({design_status:'APPROVED'}).in('result_id',ids).neq('design_status','REJECTED');await db.from('results').update({assignment_status:'ACTIVE'}).in('id',ids);const u=await db.from('initiatives').update({status:'ACTIVE',setup_status:'ACTIVE',activated_at:new Date().toISOString(),health:'ON_TRACK',next_update_due_at:null}).eq('id',init.id).select().single();if(u.error)throw u.error;{const schedule=await db.rpc('kmsa_v64_ensure_followup',{p_initiative:init.id});if(schedule.error)throw schedule.error;}{const sv=await db.rpc('kmsa_v65_ensure_supervision',{p_initiative:init.id});if(sv.error)throw sv.error;}if(init.proposal_id)await db.from('proposals').update({execution_status:'IN_PROGRESS'}).eq('id',init.proposal_id);await audit(db,profile,'PROJECT_ACTIVATE','INITIATIVE',init.id,init,u.data);await queueNotice(db,'PROJECT_ACTIVATED','INITIATIVE',init.id);return json({ok:true,initiative:u.data});
   }
 
   // The work happens outside the platform. This is an append-only visibility ledger.
@@ -627,14 +716,15 @@ Deno.serve(async(req)=>{
    const init=await getInitiative(db,payload.initiativeId);if(!(profile.role==='ADMIN'||(profile.role==='SECRETARY'&&init.secretary_id===profile.id)))throw new Error('تغيير المتابع المباشر من اختصاص السكرتير فقط.');if(['COMPLETED','CANCELLED'].includes(init.status)||init.lifecycle_state==='POSTPONED')throw new Error('لا يمكن تغيير المتابع لمشروع غير نشط.');
    const oldSupervisor=(await db.from('project_supervision_assignments').select('supervisor_id').eq('initiative_id',init.id).maybeSingle()).data?.supervisor_id||null;
    const selected=String(payload.supervisorId||'');if(selected===init.owner_id&&selected!==init.secretary_id)throw new Error('لا يمكن أن يكون النائب مسؤول التنفيذ والمتابع لنفسه.');
-   if(!selected){const d=await db.from('project_supervision_assignments').delete().eq('initiative_id',init.id);if(d.error)throw d.error;await db.from('project_activity_entries').insert({initiative_id:init.id,author_id:profile.id,kind:'SUPERVISOR_ASSIGNMENT',note:'إلغاء تفويض المتابعة والعودة للسكرتير',details:{previous_supervisor_id:oldSupervisor,new_supervisor_id:init.secretary_id}});await audit(db,profile,'PROJECT_SUPERVISOR_UNASSIGN','INITIATIVE',init.id,null,null);if(oldSupervisor)await inboxNotify(db,oldSupervisor,'PROJECT_DELEGATION_ENDED',`انتهى تكليفك بمتابعة: ${init.title}`,'انتقلت المتابعة للسكرتير.','INITIATIVE',init.id,`/workspace/projects/${init.id}`);return json({ok:true});}
+   if(!selected){const d=await db.from('project_supervision_assignments').delete().eq('initiative_id',init.id);if(d.error)throw d.error;await db.from('project_activity_entries').insert({initiative_id:init.id,author_id:profile.id,kind:'SUPERVISOR_ASSIGNMENT',note:'إلغاء تفويض المتابعة والعودة للسكرتير',details:{previous_supervisor_id:oldSupervisor,new_supervisor_id:init.secretary_id}});{const check=await db.rpc('kmsa_v65_ensure_supervision',{p_initiative:init.id});if(check.error)throw check.error;}await audit(db,profile,'PROJECT_SUPERVISOR_UNASSIGN','INITIATIVE',init.id,null,null);if(oldSupervisor)await inboxNotify(db,oldSupervisor,'PROJECT_DELEGATION_ENDED',`انتهى تكليفك بمتابعة: ${init.title}`,'انتقلت المتابعة للسكرتير.','INITIATIVE',init.id,`/workspace/projects/${init.id}`);return json({ok:true});}
    if(selected===init.owner_id && !(selected===init.secretary_id && profile.role==='SECRETARY'))throw new Error('إذا كان مسؤول التنفيذ نائبًا أو عضوًا، يجب أن يكون المتابع شخصًا آخر.');
    const {data:user}=await db.from('profiles').select('id,active').eq('id',selected).maybeSingle();if(!user?.active)throw new Error('المتابع غير فعّال.');
-   const q=await db.from('project_supervision_assignments').upsert({initiative_id:init.id,supervisor_id:selected,delegated_by:profile.id,assigned_at:new Date().toISOString()}).select().single();if(q.error)throw q.error;await db.from('project_activity_entries').insert({initiative_id:init.id,author_id:profile.id,kind:'SUPERVISOR_ASSIGNMENT',note:'تكليف متابع مباشر للمشروع',details:{previous_supervisor_id:oldSupervisor,new_supervisor_id:selected}});await audit(db,profile,'PROJECT_SUPERVISOR_ASSIGN','INITIATIVE',init.id,null,q.data);if(oldSupervisor&&oldSupervisor!==selected)await inboxNotify(db,oldSupervisor,'PROJECT_DELEGATION_ENDED',`انتهى تكليفك بمتابعة: ${init.title}`,'أصبح للمشروع متابع جديد.','INITIATIVE',init.id,`/workspace/projects/${init.id}`);await inboxNotify(db,selected,'PROJECT_SUPERVISOR_ASSIGNED',`كُلّفت بمتابعة المشروع: ${init.title}`,'سترى المشروع في مساحة العمل. المتابعة لا توقف تنفيذ المسؤول.','INITIATIVE',init.id,`/workspace/projects/${init.id}`);return json({ok:true,assignment:q.data});
+   const q=await db.from('project_supervision_assignments').upsert({initiative_id:init.id,supervisor_id:selected,delegated_by:profile.id,assigned_at:new Date().toISOString()}).select().single();if(q.error)throw q.error;await db.from('project_activity_entries').insert({initiative_id:init.id,author_id:profile.id,kind:'SUPERVISOR_ASSIGNMENT',note:'تكليف متابع مباشر للمشروع',details:{previous_supervisor_id:oldSupervisor,new_supervisor_id:selected}});{const check=await db.rpc('kmsa_v65_ensure_supervision',{p_initiative:init.id});if(check.error)throw check.error;}await audit(db,profile,'PROJECT_SUPERVISOR_ASSIGN','INITIATIVE',init.id,null,q.data);if(oldSupervisor&&oldSupervisor!==selected)await inboxNotify(db,oldSupervisor,'PROJECT_DELEGATION_ENDED',`انتهى تكليفك بمتابعة: ${init.title}`,'أصبح للمشروع متابع جديد.','INITIATIVE',init.id,`/workspace/projects/${init.id}`);await inboxNotify(db,selected,'PROJECT_SUPERVISOR_ASSIGNED',`كُلّفت بمتابعة المشروع: ${init.title}`,'سترى المشروع في مساحة العمل. المتابعة لا توقف تنفيذ المسؤول.','INITIATIVE',init.id,`/workspace/projects/${init.id}`);return json({ok:true,assignment:q.data});
   }
 
   if(['MILESTONE_COMPLETION_READ','MILESTONE_PROGRESS_REVIEW','MILESTONE_UPDATE_REQUEST'].includes(actionName)){
    const m=await getMilestone(db,payload.milestoneId);const r=await getResult(db,m.result_id);const init=r.initiative;
+   if(await isExecutionPaused(db,init.id))throw new Error('هذا المشروع في توقف مؤقت معتمد؛ تستأنف المتابعة بعد العودة.');
    if(!await canFollowProject(db,profile,init)||!reviewIdentityAllowed(profile,init,m))throw new Error('مراجعة عمل النائب أو العضو تحتاج مشرفًا آخر؛ السكرتير فقط يمكنه مراجعة مشروع ينفذه بنفسه.');
    if(init.approval_status!=='APPROVED'||init.setup_status!=='ACTIVE')throw new Error('المشروع لم يبدأ التنفيذ.');
    const kind=actionName==='MILESTONE_COMPLETION_READ'?'COMPLETION_READ':actionName==='MILESTONE_PROGRESS_REVIEW'?'PROGRESS_REVIEW':'UPDATE_REQUEST';
@@ -645,9 +735,9 @@ Deno.serve(async(req)=>{
    if(kind==='COMPLETION_READ'&&latestReview.length)throw new Error('سُجل اطلاعك على النتيجة مسبقًا.');
    if(kind==='PROGRESS_REVIEW'&&latestReview.length&&Date.now()-new Date(latestReview[0].created_at).getTime()<12*3600000)throw new Error('سبق تسجيل متابعة هذه المحطة خلال 12 ساعة.');
    if(kind==='UPDATE_REQUEST'){
-    const lastRequest=(await db.from('milestone_supervision_events').select('id').eq('milestone_id',m.id).eq('event_type','UPDATE_REQUEST').order('created_at',{ascending:false}).limit(1)).data||[];
+    const lastRequest=(await db.from('milestone_supervision_events').select('id,created_at').eq('milestone_id',m.id).eq('event_type','UPDATE_REQUEST').order('created_at',{ascending:false}).limit(1)).data||[];
     if(lastRequest.length){const answered=(await db.from('milestone_supervision_events').select('id').eq('related_request_id',lastRequest[0].id).eq('event_type','REQUEST_ANSWERED').maybeSingle()).data;
-     if(!answered)throw new Error('هناك طلب تحديث مفتوح لهذه المحطة؛ انتظر رد المسؤول أو تابع معه خارج النظام.');}
+     if(!answered&&Date.now()-new Date(lastRequest[0].created_at||0).getTime()<6*3600000)throw new Error('سبق إرسال طلب إفادة لهذه المحطة خلال آخر 6 ساعات. تواصل مع المسؤول عبر تيليجرام ودوّن نتيجة التحقق.');}
    }
    const note=String(payload.note||'').trim();
    const q=await db.from('milestone_supervision_events').insert({initiative_id:init.id,milestone_id:m.id,actor_id:profile.id,event_type:kind,note:note||null}).select().single();if(q.error)throw q.error;
@@ -657,7 +747,7 @@ Deno.serve(async(req)=>{
 
   if(actionName==='MILESTONE_QUALITY_REVIEW'){
    const m=await getMilestone(db,payload.milestoneId);
-   const r=await getResult(db,m.result_id);const init=r.initiative;
+   const r=await getResult(db,m.result_id);const init=r.initiative;if(await isExecutionPaused(db,init.id))throw new Error('المشروع متوقف مؤقتًا.');
    if(!await canFollowProject(db,profile,init)||!reviewIdentityAllowed(profile,init,m))throw new Error('غير مصرح لك بمراجعة هذه المحطة. يجب أن يراجع عمل النائب السكرتير أو شخص آخر مفوض.');
    if(init.approval_status!=='APPROVED'||init.setup_status!=='ACTIVE')throw new Error('المشروع لم يبدأ التنفيذ.');
    const reviewKind=String(payload.reviewKind||'');
@@ -725,19 +815,26 @@ Deno.serve(async(req)=>{
   }
 
   if(actionName==='MILESTONE_PROGRESS_UPDATE'){
-   const m=await getMilestone(db,payload.milestoneId);const result=await getResult(db,m.result_id);const init=result.initiative;if(!isProjectLead(profile,init,result)||m.owner_id!==profile.id)throw new Error('مسؤول المشروع فقط يحدث حالة محطة الإنجاز.');if(init.approval_status!=='APPROVED'||init.setup_status!=='ACTIVE'||['COMPLETED','CANCELLED'].includes(init.status)||init.lifecycle_state==='POSTPONED')throw new Error('المشروع ليس قيد التنفيذ.');if(['VERIFIED','CANCELLED'].includes(m.status))throw new Error('المحطة مغلقة ولا يمكن تغييرها دون إجراء رسمي.');const allowed=['IN_PROGRESS','BLOCKED','READY_FOR_VERIFICATION'];const status=allowed.includes(payload.status)?payload.status:m.status;const updateType=String(payload.updateType||'PROGRESS');
+   const m=await getMilestone(db,payload.milestoneId);const result=await getResult(db,m.result_id);const init=result.initiative;if(await isExecutionPaused(db,init.id))throw new Error('المشروع متوقف مؤقتًا؛ لا تُطلب إفادات أثناء فترة التوقف.');if(!isProjectLead(profile,init,result)||m.owner_id!==profile.id)throw new Error('مسؤول المشروع فقط يحدث حالة محطة الإنجاز.');if(init.approval_status!=='APPROVED'||init.setup_status!=='ACTIVE'||['COMPLETED','CANCELLED'].includes(init.status)||init.lifecycle_state==='POSTPONED')throw new Error('المشروع ليس قيد التنفيذ.');if(['VERIFIED','CANCELLED'].includes(m.status))throw new Error('المحطة مغلقة ولا يمكن تغييرها دون إجراء رسمي.');const allowed=['IN_PROGRESS','BLOCKED','READY_FOR_VERIFICATION'];const status=allowed.includes(payload.status)?payload.status:m.status;const updateType=String(payload.updateType||'PROGRESS');
    if(!['PROGRESS','NO_PROGRESS','BLOCKER'].includes(updateType))throw new Error('أنواع التحديث: تقدم جديد، لا يوجد تقدم، عائق / تأخر. تغيير الموعد له طلب مستقل.');
    const incomingNote=String(payload.leadNote||'').trim();const nextLeadNote=incomingNote||m.lead_note;const nextOutcome=payload.outcomeText??m.outcome_text;const nextStep=String(payload.nextStep||'').trim();if(status!=='READY_FOR_VERIFICATION'&&!incomingNote)throw new Error('اكتب إفادة محددة عمّا حدث منذ آخر تحديث، ولو لم يحدث تقدم.');if(status!=='READY_FOR_VERIFICATION'&&!nextStep)throw new Error('حدد الخطوة العملية القادمة ليتابعها المشرف.');const overdue=!!m.due_at&&new Date(m.due_at).getTime()<Date.now()&&!['VERIFIED','CANCELLED'].includes(status);if((overdue||['AT_RISK','BLOCKED'].includes(status))&&!String(nextLeadNote||'').trim())throw new Error('اكتب ملاحظة المسؤول لتوضيح سبب التعثر أو التأخير وما الذي سيحدث بعده.');if(status==='READY_FOR_VERIFICATION'&&!String(nextOutcome||'').trim())throw new Error('اكتب المخرج الفعلي الذي تحقق قبل إرساله للتحقق.');if(updateType==='COMPLETE'&&status!=='READY_FOR_VERIFICATION')throw new Error('إنجاز مكتمل يستلزم وضع المحطة مكتملة.');
    if(updateType==='BLOCKER'&&status!=='BLOCKED')throw new Error('حدد حالة مهددة أو متعثرة عند إضافة عائق.');
    if(status===m.status&&updateType!=='NO_PROGRESS'&&String(nextLeadNote||'')===String(m.lead_note||'')&&String(nextOutcome||'')===String(m.outcome_text||'')&&!nextStep)throw new Error('لم يطرأ تغيير على حالة المحطة أو تفاصيل التنفيذ.');
-   const nowIso=new Date().toISOString();const patch:any={status,outcome_text:nextOutcome,lead_note:nextLeadNote,status_updated_at:nowIso};
-   if(status==='READY_FOR_VERIFICATION'&&m.status!=='READY_FOR_VERIFICATION')patch.completed_reported_at=nowIso;const u=await db.from('milestones').update(patch).eq('id',m.id).select().single();if(u.error)throw u.error;const hh=await computedProjectHealth(db,init.id);const hres=await db.from('initiatives').update({health:hh}).eq('id',init.id);if(hres.error)throw hres.error;if(patch.completed_reported_at)await recalcDependentMilestones(db,m.id);if(status!==m.status||patch.completed_reported_at)await syncProjectCompletion(db,m.result_id);{const nextSchedule=await db.rpc('kmsa_v64_ensure_followup',{p_initiative:init.id});if(nextSchedule.error)console.error('v6.4 ensure next milestone',nextSchedule.error);}await audit(db,profile,'MILESTONE_PROGRESS_UPDATE','MILESTONE',m.id,m,u.data);
+   const nowIso=new Date().toISOString();
+   const saved=await db.rpc('kmsa_v65_save_milestone_progress',{p_milestone:m.id,p_author:profile.id,p_status:status,p_note:incomingNote||null,p_outcome:nextOutcome,p_update_type:updateType,p_next_step:nextStep||null});
+   if(saved.error)throw saved.error;
+   const u={data:saved.data.milestone};
    let reviewerNotified=true;
+   try{
+    const hh=await computedProjectHealth(db,init.id);
+    const hres=await db.from('initiatives').update({health:hh}).eq('id',init.id);if(hres.error)throw hres.error;
+    if(status==='READY_FOR_VERIFICATION'&&m.status!=='READY_FOR_VERIFICATION')await recalcDependentMilestones(db,m.id);
+    if(status!==m.status||(status==='READY_FOR_VERIFICATION'&&m.status!=='READY_FOR_VERIFICATION'))await syncProjectCompletion(db,m.result_id);
+    const nextSchedule=await db.rpc('kmsa_v64_ensure_followup',{p_initiative:init.id});if(nextSchedule.error)throw nextSchedule.error;
+    await audit(db,profile,'MILESTONE_PROGRESS_UPDATE','MILESTONE',m.id,m,u.data);
+   }catch(e){reviewerNotified=false;console.error('Nonfatal followup metadata error after atomic save',e)}
    {
-    const entry=await db.from('project_activity_entries').insert({initiative_id:init.id,milestone_id:m.id,author_id:profile.id,kind:'MILESTONE_UPDATE',note:String(payload.leadNote||'').trim()||null,status_after:status,details:{previous_status:m.status,outcome:nextOutcome||null,update_type:updateType,next_step:nextStep||null}}).select('id,created_at').single();if(entry.error)throw entry.error;
-    // Advance ONLY the anchored checkpoint that this report satisfies.
-    const schedule=await db.rpc('kmsa_v64_register_followup',{p_milestone:m.id,p_reported_at:entry.data?.created_at||nowIso});
-    if(schedule.error)console.error('v6.4 check-in registration',schedule.error);
+    const entry={data:{id:saved.data.activity_id,created_at:saved.data.created_at}};
     // Notify the actual reviewer about this new version; a previous review never carries over.
     const delegate=(await db.from('project_supervision_assignments').select('supervisor_id').eq('initiative_id',init.id).maybeSingle()).data?.supervisor_id;
     const reviewerId=delegate||init.secretary_id;
