@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { loadProjectFollowup } from './projectFollowup';
 import type { Blocker, Evidence, Initiative, Intervention, MemberDirectoryItem, Milestone, Plan, Profile, ProjectBundle, ProjectIntervention, ProjectPermission, ProjectPermissionApproval, ProjectSheetRow, ProjectUpdate, Proposal, ProposalDocumentStatus, ProposalSheetRow, ResultItem, RoutineObligationRow, Secretariat, WeeklyCommitment } from './types';
 
 export async function currentProfile(): Promise<Profile> {
@@ -76,7 +77,7 @@ export async function workspaceProjects(): Promise<Initiative[]> {
 export async function workspaceProject(id:string): Promise<ProjectBundle> {
   // First locate this project's results; then load only its milestones/evidence.
   // A secretary must not download the association's entire activity ledger to open one project.
-  const [i,r,u,p,pi,o,a,sv,se,dr,cr,sf]=await Promise.all([
+  const [i,r,u,p,pi,o,a,sv,se,dr,cr,sf,fs]=await Promise.all([
     supabase.from('initiatives').select('*,secretariat:secretariats(*),owner:profiles!initiatives_owner_id_fkey(id,full_name),secretary:profiles!initiatives_secretary_id_fkey(id,full_name)').eq('id',id).single(),
     supabase.from('results').select('*,owner:profiles!results_owner_id_fkey(id,full_name)').eq('initiative_id',id).order('created_at'),
     supabase.from('project_updates').select('*,author:profiles(full_name)').eq('initiative_id',id).order('created_at',{ascending:false}),
@@ -88,9 +89,10 @@ export async function workspaceProject(id:string): Promise<ProjectBundle> {
     supabase.from('milestone_supervision_events').select('*,actor:profiles!milestone_supervision_events_actor_id_fkey(id,full_name)').eq('initiative_id',id).order('created_at',{ascending:false}),
     supabase.from('milestone_deadline_requests').select('*').eq('initiative_id',id).order('created_at',{ascending:false}),
     supabase.from('project_closure_requests').select('*').eq('initiative_id',id).order('requested_at',{ascending:false}),
-    supabase.from('project_supervision_followups').select('*').eq('initiative_id',id).order('created_at',{ascending:false})
+    supabase.from('project_supervision_followups').select('*').eq('initiative_id',id).order('created_at',{ascending:false}),
+    supabase.from('milestone_followup_schedules').select('milestone_id,initiative_id,interval_hours,next_due_at,last_report_at').eq('initiative_id',id)
   ]);
-  for(const x of [i,r,u,p,pi,o,a,sv,se,dr,cr,sf]) if(x.error)throw x.error;
+  for(const x of [i,r,u,p,pi,o,a,sv,se,dr,cr,sf,fs]) if(x.error)throw x.error;
   const resultIds=(r.data||[]).map((x:any)=>x.id);
   const m=resultIds.length?await supabase.from('milestones').select('*,owner:profiles!milestones_owner_id_fkey(id,full_name),result:results(*)').in('result_id',resultIds).order('sequence_no').order('due_at'):{data:[],error:null};
   if(m.error)throw m.error;
@@ -100,7 +102,7 @@ export async function workspaceProject(id:string): Promise<ProjectBundle> {
     milestoneIds.length?supabase.from('milestone_evidence').select('*').in('milestone_id',milestoneIds).order('created_at',{ascending:false}):Promise.resolve({data:[],error:null})
   ]);
   if(b.error)throw b.error;if(e.error)throw e.error;
-  return {initiative:i.data as Initiative,results:(r.data||[]) as ResultItem[],milestones:(m.data||[]) as Milestone[],updates:(u.data||[]) as ProjectUpdate[],permissions:(p.data||[]) as ProjectPermission[],interventions:(pi.data||[]) as ProjectIntervention[],blockers:(b.data||[]) as Blocker[],oversight:o.data||[],activity:a.data||[],evidence:(e.data||[]) as Evidence[], supervisor:sv.data||null, supervisionEvents:se.data||[], deadlineRequests:dr.data||[], closureRequests:cr.data||[], supervisionFollowups:sf.data||[]};
+  return {followupSchedules:(fs.data||[]) as any[],initiative:i.data as Initiative,results:(r.data||[]) as ResultItem[],milestones:(m.data||[]) as Milestone[],updates:(u.data||[]) as ProjectUpdate[],permissions:(p.data||[]) as ProjectPermission[],interventions:(pi.data||[]) as ProjectIntervention[],blockers:(b.data||[]) as Blocker[],oversight:o.data||[],activity:a.data||[],evidence:(e.data||[]) as Evidence[], supervisor:sv.data||null, supervisionEvents:se.data||[], deadlineRequests:dr.data||[], closureRequests:cr.data||[], supervisionFollowups:sf.data||[]};
 }
 export async function projectPermissionsPending(): Promise<(ProjectPermissionApproval & {permission:ProjectPermission})[]> {
   const {data,error}=await supabase.rpc('permission_approval_queue');if(error)throw error;return (data||[]) as any;
@@ -290,33 +292,8 @@ export async function eventAttendance(...args:any[]): Promise<any[]> {
 
 /** Pending evaluation of the newest update, scoped to projects this person actually supervises. */
 export async function workspaceReviewerQueue(user:Profile, projects:ProjectSheetRow[]):Promise<{projectId:string;title:string;milestoneTitle:string;milestoneId:string;createdAt:string;isResult:boolean}[]> {
- const active=projects.filter(p=>p.approval_status==='APPROVED'&&p.setup_status==='ACTIVE');
- if(!active.length)return [];
- const ids=active.slice(0,100).map(p=>p.project_id);
- const assigned=await supabase.from('project_supervision_assignments').select('initiative_id,supervisor_id').in('initiative_id',ids);
- if(assigned.error)throw assigned.error;
- const direct=new Map((assigned.data||[]).map(x=>[x.initiative_id,x.supervisor_id]));
- const eligible=active.filter(p=>(direct.get(p.project_id)||p.secretary_id)===user.id);
- if(!eligible.length)return [];
- const eid=eligible.map(x=>x.project_id);
- const [events,reviews,milestones]=await Promise.all([
-  supabase.from('project_activity_entries').select('id,initiative_id,milestone_id,created_at,status_after').in('initiative_id',eid).eq('kind','MILESTONE_UPDATE').order('created_at',{ascending:false}).limit(900),
-  supabase.from('milestone_supervision_events').select('source_activity_id,actor_id').in('initiative_id',eid).in('event_type',['PROGRESS_OK','PROGRESS_FOLLOW_UP','RESULT_OK','RESULT_REVISION']).order('created_at',{ascending:false}).limit(900),
-  supabase.from('results').select('id,initiative_id,milestones(id,title)').in('initiative_id',eid)
- ]);
- for(const resp of [events,reviews,milestones])if(resp.error)throw resp.error;
- const seen=new Set<string>();const reviewed=new Set((reviews.data||[]).map(x=>`${x.source_activity_id}:${x.actor_id}`));
- const titles=new Map<string,string>();
- for(const r of milestones.data||[])for(const m of (r.milestones||[]) as {id:string;title:string}[])titles.set(m.id,m.title);
- const found:{projectId:string;title:string;milestoneTitle:string;milestoneId:string;createdAt:string;isResult:boolean}[]=[];
- for(const e of events.data||[]){
-  if(!e.milestone_id||seen.has(e.milestone_id))continue;
-  seen.add(e.milestone_id);
-  if(reviewed.has(`${e.id}:${user.id}`))continue;
-  const p=eligible.find(x=>x.project_id===e.initiative_id);if(!p)continue;
-  // Secretary may self-review own project; a deputy/member never reviews their own work.
-  if(p.lead_id===user.id&&!(user.role==='SECRETARY'&&p.secretary_id===user.id))continue;
-  found.push({projectId:p.project_id,title:p.project_title,milestoneId:e.milestone_id,milestoneTitle:titles.get(e.milestone_id)||p.current_milestone||'محطة إنجاز',createdAt:e.created_at,isResult:['READY_FOR_VERIFICATION','VERIFIED'].includes(e.status_after||'')});
- }
- return found;
+ // Same source of truth as the secretary supervision list. No 100-project truncation.
+ const snapshot=await loadProjectFollowup(projects,user.id);
+ return snapshot.reviewPending.filter(x=>x.supervisorId===user.id && x.project.lead_id!==user.id)
+  .map(x=>({projectId:x.project.project_id,title:x.project.project_title,milestoneTitle:x.milestoneTitle,milestoneId:x.milestoneId,createdAt:x.update!.created_at,isResult:['READY_FOR_VERIFICATION','VERIFIED'].includes(x.update!.status_after||'')}));
 }

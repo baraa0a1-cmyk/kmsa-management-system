@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, ArrowLeft, CheckCircle2, FileText, ListTodo, Plus, RefreshCw, Target } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { proposalTrackingSheet, quickTaskSheet, routineObligationSheet, workspaceProjectSheet, workspaceReviewerQueue } from '../lib/api';
+import { proposalTrackingSheet, quickTaskSheet, routineObligationSheet, workspaceProjectSheet } from '../lib/api';
 import { useAuth } from '../hooks/useAuth';
+import { loadProjectFollowup } from '../lib/projectFollowup';
 import type { ProjectSheetRow, ProposalSheetRow, QuickTaskRow, RoutineObligationRow } from '../lib/types';
 import { formatDate, profileTitle } from '../lib/labels';
 
@@ -17,7 +18,7 @@ export default function WorkspaceHomePage(){
  const [proposals,setProposals]=useState<ProposalSheetRow[]>([]);
  const [loading,setLoading]=useState(true);
  const [errors,setErrors]=useState<string[]>([]);
- const [reviewQueue,setReviewQueue]=useState<FocusItem[]>([]);
+ const [reviewQueue,setReviewQueue]=useState<FocusItem[]>([]);const [monitorFocus,setMonitorFocus]=useState<FocusItem[]>([]);
  const load=useCallback(async()=>{
   setLoading(true);
   const labels=['المشاريع','المهام','العمل الدوري','المقترحات'];
@@ -29,10 +30,23 @@ export default function WorkspaceHomePage(){
   if(result[2].status==='fulfilled')setRoutines(result[2].value);
   if(result[3].status==='fulfilled')setProposals(result[3].value);
   if(profile&&result[0].status==='fulfilled'&&['SECRETARY','GS','ADMIN','MEMBER','APPLICANT'].includes(profile.role)){
-   try{const waiting=await workspaceReviewerQueue(profile,result[0].value);
+   let snapshot:Awaited<ReturnType<typeof loadProjectFollowup>>|null=null;
+   try{snapshot=await loadProjectFollowup(result[0].value,profile.id);
+    const waiting=snapshot.reviewPending.filter(x=>x.supervisorId===profile.id && (x.project.lead_id!==profile.id||(profile.role==='SECRETARY'&&x.project.secretary_id===profile.id))).map(x=>({projectId:x.project.project_id,title:x.project.project_title,milestoneTitle:x.milestoneTitle,milestoneId:x.milestoneId,createdAt:x.update!.created_at,isResult:['READY_FOR_VERIFICATION','VERIFIED'].includes(x.update!.status_after||'')}));
     setReviewQueue(waiting.map(v=>({key:`review-${v.milestoneId}`,kind:'project' as const,title:v.title,route:`/workspace/projects/${v.projectId}?milestone=${v.milestoneId}&action=review`,date:v.createdAt,priority:0,text:`${v.isResult?'نتيجة':'تحديث'} محطة «${v.milestoneTitle}» ينتظر تقييمك. المطلوب: افتح المحطة وقيّم ${v.isResult?'النتيجة':'التقدم'}.`})));
    }catch{failed.push('تقييمات المشاريع');setReviewQueue([])}
-  }else setReviewQueue([]);
+   if(profile.role==='SECRETARY'&&snapshot){
+    try{
+     const projectSeen=new Set<string>();
+     setMonitorFocus(snapshot.secretaryActions.filter(x=>x.delegated||x.secretaryAction==='REQUEST_UPDATE').filter(x=>{if(projectSeen.has(x.project.project_id))return false;projectSeen.add(x.project.project_id);return true}).map(x=>({
+      key:`monitor-${x.project.project_id}`,kind:'project' as const,title:x.project.project_title,
+      route:x.secretaryAction==='REQUEST_UPDATE'?`/workspace/projects/${x.project.project_id}?milestone=${x.milestoneId}&action=request-update`:'/workspace/projects?tab=supervision',
+      date:x.schedule?.next_due_at||x.reviewDueAt||x.correctionDueAt||null,
+      priority:0,text:x.secretaryAction==='REQUEST_UPDATE'?`لم تصل إفادة «${x.milestoneTitle}» في موعدها`:x.secretaryAction==='REQUEST_REVIEW'?`تأخر تقييم المتابع لمحطة «${x.milestoneTitle}»`:x.secretaryAction==='ESCALATE'?'لم يستجب المتابع بعد طلبي تقييم':'انتهى موعد التصحيح، ويلزم التحقق من الاستجابة'
+     })));
+    }catch{failed.push('متابعة الإشراف');setMonitorFocus([])}
+   }else setMonitorFocus([]);
+  }else {setReviewQueue([]);setMonitorFocus([])};
   setErrors(failed);setLoading(false);
  },[profile?.id,profile?.role]);
  useEffect(()=>{void load()},[load]);
@@ -54,6 +68,7 @@ export default function WorkspaceHomePage(){
    else if(isSecretary&&p.approval_status==='RETURNED')list.push({key:`returned-${p.project_id}`,kind:'project',title:p.project_title,route:`/workspace/projects/${p.project_id}`,date:p.target_due_at,text:'أعيد قرار التكليف للمراجعة والتصحيح',priority:0});
   }}
   for(const p of myProjects){
+   if(monitorFocus.some(x=>x.key===`monitor-${p.project_id}`))continue;
    if(!p.current_milestone_overdue&&!p.open_blockers&&!p.secretary_response_needed)continue;
    const isOwner=memberLike;
    list.push({key:`p-${p.project_id}`,kind:'project',title:p.project_title,route:`/workspace/projects/${p.project_id}`,date:p.current_milestone_due_at,
@@ -71,8 +86,8 @@ export default function WorkspaceHomePage(){
   }
   for(const p of myProposals){list.push({key:`q-${p.proposal_id}`,kind:'proposal',title:p.title,route:`/workspace/proposals/${p.proposal_id}`,date:p.stage_due_at,
    text:p.overdue?`تجاوز المقترح مدة الاستجابة · ${p.days_in_current_stage} يوم`:`ينتظر إجراءً · ${p.days_in_current_stage} يوم في المرحلة`,priority:p.overdue?1:5});}
-  return [...reviewQueue,...list].sort((a,b)=>a.priority-b.priority||(a.date||'9999').localeCompare(b.date||'9999'));
- },[myProjects,myTasks,myRoutines,myProposals,memberLike,projects,oversight,isSecretary,reviewQueue]);
+  return [...reviewQueue,...monitorFocus,...list].sort((a,b)=>a.priority-b.priority||(a.date||'9999').localeCompare(b.date||'9999'));
+ },[myProjects,myTasks,myRoutines,myProposals,memberLike,projects,oversight,isSecretary,reviewQueue,monitorFocus]);
  if(!profile)return null;
  return <div className="workspace-stack workspace-home-v3">
   <section className="workspace-home-hero"><div><span className="workspace-kicker">المتابعة والتنفيذ</span><h1>{memberLike?'ما يحتاج منك الآن':profileTitle(profile)}</h1>

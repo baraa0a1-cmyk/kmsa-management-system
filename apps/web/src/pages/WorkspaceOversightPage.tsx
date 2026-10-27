@@ -20,7 +20,7 @@ export default function WorkspaceOversightPage(){
      const [delegations,updates,reviews,requests]=await Promise.all([
       supabase.from('project_supervision_assignments').select('initiative_id,supervisor_id,assigned_at').in('initiative_id',ids),
       supabase.from('project_activity_entries').select('id,initiative_id,milestone_id,created_at').eq('kind','MILESTONE_UPDATE').in('initiative_id',ids).order('created_at',{ascending:false}).limit(1000),
-      supabase.from('milestone_supervision_events').select('source_activity_id,actor_id').in('initiative_id',ids).in('event_type',['PROGRESS_OK','PROGRESS_FOLLOW_UP','RESULT_OK','RESULT_REVISION']).limit(1000),
+      supabase.from('milestone_supervision_events').select('source_activity_id,actor_id').in('initiative_id',ids).in('event_type',['PROGRESS_OK','PROGRESS_FOLLOW_UP','PROGRESS_UNCLEAR','RESULT_OK','RESULT_REVISION']).limit(1000),
       supabase.from('project_supervision_followups').select('source_activity_id,delegated_supervisor_id,review_request_attempt,followup_due_at').in('initiative_id',ids).not('review_request_attempt','is',null).limit(1000)
      ]);
      for(const r of [delegations,updates,reviews,requests])if(r.error)throw r.error;

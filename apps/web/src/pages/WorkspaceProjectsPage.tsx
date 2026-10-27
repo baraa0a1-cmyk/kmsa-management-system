@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Plus, Search, Target, Printer, FileSpreadsheet } from 'lucide-react';
+import { ArrowLeft, Plus, Search, Target, Printer, FileSpreadsheet, SlidersHorizontal, Clock3 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import WorkspaceSupervisionPage from './WorkspaceSupervisionPage';
 import WorkspaceProjectDecisionsPage from './WorkspaceProjectDecisionsPage';
 import { exportCsv, secretariats, workspaceProjectSheet } from '../lib/api';
 import { supabase } from '../lib/supabase';
+import { loadProjectFollowup, followupIssueLabel, type FollowupSnapshot } from '../lib/projectFollowup';
 import { useAuth } from '../hooks/useAuth';
 import type { ProjectSheetRow, Secretariat } from '../lib/types';
-import { formatDate, milestoneStatusLabel } from '../lib/labels';
+import { formatDate, formatDateTime, milestoneStatusLabel } from '../lib/labels';
 
 const approvalLabel:Record<string,string>={PENDING_GS:'بانتظار اعتماد GS',APPROVED:'معتمد',RETURNED:'أعيد للمراجعة'};
 const healthLabel:Record<string,string>={ON_TRACK:'على المسار',WATCH:'يحتاج توضيحًا',AT_RISK:'مهدد',BLOCKED:'متعثر'};
@@ -21,7 +22,9 @@ export default function WorkspaceProjectsPage(){
  const ownerWrap=useRef<HTMLDivElement|null>(null), supervisorWrap=useRef<HTMLDivElement|null>(null);
  const [pendingDecisions,setPendingDecisions]=useState(0);const [supervisionCount,setSupervisionCount]=useState(0);
  const [busy,setBusy]=useState(true);const [error,setError]=useState('');
+ const [refreshRevision,setRefreshRevision]=useState(0);const [advancedOpen,setAdvancedOpen]=useState(false);const [snapshot,setSnapshot]=useState<FollowupSnapshot>({items:[],secretaryActions:[],reviewPending:[],reportLate:[]});
  const global=!!profile&&['GS','PRESIDENT'].includes(profile.role);const canCreate=profile?.role==='SECRETARY';const isMember=['APPLICANT','MEMBER'].includes(profile?.role||'');
+ useEffect(()=>{const refresh=()=>setRefreshRevision(v=>v+1);window.addEventListener('kmsa:followup-changed',refresh);return()=>window.removeEventListener('kmsa:followup-changed',refresh)},[]);
  useEffect(()=>{let live=true;setBusy(true);setError('');Promise.all([workspaceProjectSheet(),secretariats()]).then(async([projectRows,sections])=>{
   if(!live)return;setRows(projectRows);setSecs(sections);setBusy(false);
   if(!profile?.id||!hasSupervision)return;
@@ -29,17 +32,10 @@ export default function WorkspaceProjectsPage(){
   let pending=0;
   for(let i=0;i<scoped.length;i+=80){const resp=await supabase.from('project_closure_requests').select('id',{count:'exact',head:true}).in('initiative_id',scoped.slice(i,i+80).map(x=>x.project_id)).eq('status','PENDING');if(!live)return;if(resp.error){setError('تعذر قراءة عداد قرارات المشاريع: '+resp.error.message);break;}pending+=resp.count||0;}
   if(live)setPendingDecisions(pending);
-  // Supervision count in tab is based on pending explicit review activities, not arbitrary health colors.
-  const allowedIds=scoped.filter(p=>p.approval_status==='APPROVED'&&!['COMPLETED','CANCELLED'].includes(p.project_status)&&p.lifecycle_state!=='POSTPONED').map(p=>p.project_id);
-  if(!allowedIds.length)return;
-  const ids=allowedIds.slice(0,100);const a=await supabase.from('project_supervision_assignments').select('initiative_id,supervisor_id').in('initiative_id',ids);
-  const u=await supabase.from('project_activity_entries').select('id,initiative_id,milestone_id,created_at').in('initiative_id',ids).eq('kind','MILESTONE_UPDATE').order('created_at',{ascending:false}).limit(1000);
-  const r=await supabase.from('milestone_supervision_events').select('source_activity_id,actor_id').in('initiative_id',ids).in('event_type',['PROGRESS_OK','PROGRESS_FOLLOW_UP','RESULT_OK','RESULT_REVISION']).limit(1000);
-  if(!live||a.error||u.error||r.error)return;
-  const supervisors=new Map((a.data||[]).map(x=>[x.initiative_id,x.supervisor_id]));
-  const seen=new Set<string>();const unreviewed=(u.data||[]).filter(x=>{const k=x.initiative_id+'-'+x.milestone_id;if(seen.has(k))return false;seen.add(k);const target=supervisors.get(x.initiative_id);return target&&Date.now()-new Date(x.created_at).getTime()>=48*3600000&&!(r.data||[]).some(z=>z.source_activity_id===x.id&&z.actor_id===target)});
-  if(live)setSupervisionCount(unreviewed.length);
- }).catch(e=>{if(live){setError(e?.message||'تعذر جلب قائمة المشاريع.');setBusy(false)}});return()=>{live=false};},[profile?.id,profile?.secretariat_id,profile?.role,hasSupervision,tab]);
+  // Shared v6.4 read model: the counter and the actual supervision page use identical rules.
+  const summary=await loadProjectFollowup(scoped,profile.id);
+  if(live){setSnapshot(summary);setSupervisionCount(summary.items.filter(x=>x.secretaryAction!==null||(!x.delegated&&!!x.update&&!x.review)).length);}
+ }).catch(e=>{if(live){setError(e?.message||'تعذر جلب قائمة المشاريع.');setBusy(false)}});return()=>{live=false};},[profile?.id,profile?.secretariat_id,profile?.role,hasSupervision,tab,refreshRevision]);
  useEffect(()=>{setOwnersOpen(false);setSupervisorsOpen(false)},[tab]);
  useEffect(()=>{const dismiss=(e:PointerEvent)=>{if(!ownerWrap.current?.contains(e.target as Node))setOwnersOpen(false);if(!supervisorWrap.current?.contains(e.target as Node))setSupervisorsOpen(false)};
   const esc=(e:KeyboardEvent)=>{if(e.key==='Escape'){setOwnersOpen(false);setSupervisorsOpen(false)}};
@@ -88,20 +84,32 @@ export default function WorkspaceProjectsPage(){
   </nav>}
   {error&&<div role="alert" className="member-form-error">{error}</div>}
   {tab==='supervision'&&hasSupervision?<WorkspaceSupervisionPage/>:tab==='decisions'&&hasSupervision?<WorkspaceProjectDecisionsPage/>:<>
-  <header className="workspace-page-head v57-project-heading"><div><span className="workspace-kicker">المشاريع / متابعة التنفيذ</span><h1>{isMember?'مشاريعي':profile?.role==='SECRETARY'?'مشاريع السكرتارية':'المشاريع'}</h1><p>من المسؤول؟ ما آخر ما تحقق؟ ومتى يستحق التدخل؟</p></div><div className="workspace-head-actions">{canCreate&&<Link className="workspace-primary" to="/workspace/projects/new"><Plus size={16}/>مشروع جديد</Link>}</div></header>
-  <section className="workspace-card v57-project-table-panel"><div className="v57-project-filters">
+  <header className="workspace-page-head v57-project-heading"><div><span className="workspace-kicker">المشاريع / متابعة التنفيذ</span><h1>{isMember?'مشاريعي':profile?.role==='SECRETARY'?'مشاريع السكرتارية':'المشاريع'}</h1><p>ماذا تحقق فعليًا؟ وهل التقدم مناسب؟ ومن عليه الخطوة التالية؟</p></div><div className="workspace-head-actions">{canCreate&&<Link className="workspace-primary" to="/workspace/projects/new"><Plus size={16}/>مشروع جديد</Link>}</div></header>
+  <section className="workspace-card v57-project-table-panel"><div className="v57-project-filters v64-project-filters">
    <label className="workspace-search"><Search size={17}/><input value={q} onChange={e=>setQ(e.target.value)} placeholder="ابحث عن مشروع أو مسؤول أو نتيجة"/></label>
+<button className="workspace-secondary small v64-advanced-toggle" onClick={()=>setAdvancedOpen(v=>!v)}><SlidersHorizontal size={15}/>{advancedOpen?'إخفاء الخيارات':'تصفية وخيارات'}</button>
+   <span className="workspace-filter-count">{filtered.length} مشروع</span>
+   <div className={`v64-extra-filters ${advancedOpen?'open':''}`}>
    <div className="v57-filters"><button className={ownership==='all'?'active':''} onClick={()=>setOwnership('all')}>الكل</button><button className={ownership==='mine'?'active':''} onClick={()=>setOwnership('mine')}>المسؤول عنها أنا</button>{!isMember&&<button className={ownership==='team'?'active':''} onClick={()=>setOwnership('team')}>مسؤولية الآخرين</button>}</div>
    {!isMember&&<div className="v57-owner-picker" ref={ownerWrap}><button className="workspace-secondary small" onClick={()=>{setSupervisorsOpen(false);setOwnersOpen(v=>!v)}}>المسؤولون {owners.length>0?`(${owners.length})`:''}</button>{ownersOpen&&<div className="v57-owner-options"><strong>اختر أكثر من مسؤول</strong>{candidates.map(o=><label key={o.id}><input type="checkbox" checked={owners.includes(o.id)} onChange={e=>setOwners(v=>e.target.checked?[...v,o.id]:v.filter(x=>x!==o.id))}/>{o.name}</label>)}<button className="workspace-secondary small" onClick={()=>{setOwners([]);setOwnersOpen(false)}}>إزالة الاختيار</button></div>}</div>}
    {!isMember&&<div className="v57-owner-picker" ref={supervisorWrap}><button className="workspace-secondary small" onClick={()=>{setOwnersOpen(false);setSupervisorsOpen(v=>!v)}}>المشرفون {supervisorIds.length?`(${supervisorIds.length})`:''}</button>{supervisorsOpen&&<div className="v57-owner-options"><strong>المشرف المتابع</strong>{supervisors.map(x=><label key={x.id}><input type="checkbox" checked={supervisorIds.includes(x.id)} onChange={e=>setSupervisorIds(v=>e.target.checked?[...v,x.id]:v.filter(id=>id!==x.id))}/>{x.name}</label>)}<button className="workspace-secondary small" onClick={()=>{setSupervisorIds([]);setSupervisorsOpen(false)}}>مسح الفلتر</button></div>}</div>}
    {global&&<select className="select compact-filter" aria-label="السكرتارية" value={sec} onChange={e=>setSec(e.target.value)}><option value="">كل السكرتاريات</option>{secs.map(s=><option key={s.id} value={s.id}>{s.name_ar}</option>)}</select>}
    <select className="select compact-filter" aria-label="حالة المشروع" value={status} onChange={e=>setStatus(e.target.value)}><option value="ALL">جميع الحالات</option><option value="ACTIVE">جارٍ العمل</option><option value="PENDING">بانتظار الاعتماد</option><option value="DONE">مغلق بنجاح</option><option value="POSTPONED">مؤجل</option><option value="CANCELLED">ملغى</option></select><label className="v58-filter-date">من <input type="date" aria-label="من تاريخ" value={fromDate} onChange={e=>setFromDate(e.target.value)}/></label><label className="v58-filter-date">إلى <input type="date" aria-label="إلى تاريخ" value={toDate} onChange={e=>setToDate(e.target.value)}/></label>
    {(owners.length>0||supervisorIds.length>0||status!=='ALL'||fromDate||toDate||q)&&<button className="workspace-secondary small" onClick={()=>{setOwners([]);setSupervisorIds([]);setStatus('ALL');setFromDate('');setToDate('');setQ('')}}>مسح الفلاتر</button>}
-   <span className="workspace-filter-count">{filtered.length} مشروع</span>
    <button className="workspace-secondary small" disabled={!filtered.length} onClick={csv}><FileSpreadsheet size={14}/> Excel/CSV</button><button className="workspace-secondary small" disabled={!filtered.length} onClick={printReport}><Printer size={14}/> PDF</button>
-  </div><div className="workspace-sheet-wrap"><table className="workspace-sheet v57-project-sheet"><thead><tr>{global&&<th>السكرتارية</th>}<th>المشروع</th><th>المسؤول</th><th>آخر ما تحقق / النتيجة</th><th>المحطة الحالية</th><th>الموعد</th><th>الحالة</th><th></th></tr></thead><tbody>
-   {filtered.map(r=>{const s=stateFor(r);return <tr key={r.project_id}>{global&&<td>{r.secretariat_name}</td>}<td><Link to={`/workspace/projects/${r.project_id}`}><strong>{r.project_title}</strong></Link><small>{approvalLabel[r.approval_status]||''}</small></td><td><strong>{r.lead_name||'—'}</strong><small>{r.secretary_name?`السكرتير: ${r.secretary_name}`:''}</small></td><td className="v57-output-cell">{r.latest_update_note||r.last_lead_note||r.result_statement||'لم يُسجّل تحديث بعد'}</td><td><strong>{r.current_milestone||'—'}</strong><small>{r.current_milestone_status?milestoneStatusLabel[r.current_milestone_status as keyof typeof milestoneStatusLabel]||r.current_milestone_status:''}</small></td><td>{formatDate(r.current_milestone_due_at||r.target_due_at)}{r.current_milestone_overdue&&r.lifecycle_state!=='POSTPONED'&&<small className="danger-text">محطة تجاوزت الموعد</small>}</td><td><span className={`v57-lifecycle status-${s.tone}`}>{s.label}</span></td><td><Link className="v55-row-link" to={`/workspace/projects/${r.project_id}`}>فتح <ArrowLeft size={14}/></Link></td></tr>})}
-   {!filtered.length&&<tr><td colSpan={global?8:7}><div className="workspace-empty"><Target/>{busy?'جارٍ تحميل المشاريع…':'لا توجد مشاريع بهذا الاختيار.'}</div></td></tr>}
-  </tbody></table></div></section></>}
+  </div></div><div className="v64-project-list">
+   {filtered.length===0?<div className="workspace-empty"><Target/>{busy?'جارٍ تحميل المشاريع…':'لا توجد مشاريع بهذا الاختيار.'}</div>:
+    filtered.map(r=>{
+     const state=stateFor(r);
+     const focus=snapshot.items.filter(x=>x.project.project_id===r.project_id).sort((a,b)=>Number(!!b.secretaryAction)-Number(!!a.secretaryAction))[0];
+     const issue=focus?followupIssueLabel[focus.issue]:null;
+     const actual=r.latest_update_note||r.last_lead_note||'';
+     return <Link key={r.project_id} className="v64-project-row" to={`/workspace/projects/${r.project_id}`}>
+      <div className="v64-row-main"><div className="v64-row-title"><strong>{r.project_title}</strong><span className={`v64-status ${['BLOCKED','AT_RISK'].includes(r.health)?'warn':r.project_status==='COMPLETED'?'good':'neutral'}`}>{state.label}</span></div><small>{r.lead_name||'مسؤول لم يُحدّد'}{global?` · ${r.secretariat_name}`:''}</small><p>{actual||'لم تصل إفادة موثقة بعد — النتيجة المطلوبة ليست إنجازًا فعليًا.'}</p></div>
+      <div className="v64-row-monitor"><span>{focus?.milestoneTitle||r.current_milestone||'—'}</span><small>{issue||'حالة المشروع'}</small>{focus?.schedule&&!['READY_FOR_VERIFICATION','VERIFIED'].includes(focus.update?.status_after||'')&&<small><Clock3 size={12}/>الإفادة القادمة: {formatDateTime(focus.schedule.next_due_at)}</small>}</div>
+      <span className="v64-row-open">فتح <ArrowLeft size={15}/></span>
+     </Link>;
+    })}
+  </div></section></>}
  </div>;
 }
