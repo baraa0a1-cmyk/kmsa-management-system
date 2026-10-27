@@ -9,6 +9,7 @@ const mon=read('supabase/functions/scheduled-monitor/index.ts');
 const sql=read('KMSA_V5_7_UPGRADE.sql');
 const p=read('apps/web/src/pages/WorkspaceProjectsPage.tsx');
 const sup=read('apps/web/src/pages/WorkspaceSupervisionPage.tsx');
+const followup=read('apps/web/src/lib/projectFollowup.ts');
 const dec=read('apps/web/src/pages/WorkspaceProjectDecisionsPage.tsx');
 const project=read('apps/web/src/pages/WorkspaceProjectPage.tsx');
 const gs=read('apps/web/src/pages/WorkspaceOversightPage.tsx');
@@ -22,7 +23,7 @@ const tests=[
  ['Request must belong to project and current delegation',()=>wf.includes('source.initiative_id!==init.id')&&wf.includes('assignment.data.assigned_at')],
  ['Do not request review of stale version',()=>wf.includes('latest.data?.id!==source.id')],
  ['Already-reviewed update cannot receive reminder',()=>wf.includes('النائب قيّم هذا التحديث بالفعل')],
- ['Default 48 hour evaluation deadline',()=>wf.includes('age<48*3600000')],
+ ['Adaptive evaluation deadline for short stations',()=>wf.includes('age<graceHours*3600000')&&wf.includes('Math.max(4,Math.min(24')&&followup.includes('reviewerGraceHours')],
  ['Second reminder only after first 24h',()=>wf.includes('attempt===2')&&wf.includes('followup_due_at')],
  ['No third reminder',()=>wf.includes('attempt>2')],
  ['First and second request labels explicit',()=>wf.includes('طلب تقييم أول')&&wf.includes('طلب تقييم ثانٍ')],
@@ -37,9 +38,9 @@ const tests=[
  ['No progress report is not falsely counted as progress',()=>mon.includes('lastReportMs')&&mon.includes('lastProgressMs')],
  ['Project area includes supervision and decisions tabs',()=>p.includes('WorkspaceSupervisionPage')&&p.includes('WorkspaceProjectDecisionsPage')],
  ['Decisions tab has pending badge',()=>p.includes('pendingDecisions>0')&&p.includes('v57-count-dot')],
- ['Supervision tabs have all direct delegated filters',()=>sup.includes('إشرافي المباشر')&&sup.includes('الإشراف المفوّض')&&sup.includes('الكل')],
- ['Supervision tracks each station not just latest project',()=>sup.includes('seenStations')&&sup.includes('reviewQueue')],
- ['Supervision first and second requests have loading and error states',()=>sup.includes('جارٍ إرسال الطلب')&&sup.includes('setError(')&&sup.includes('setNotice(')],
+ ['Supervision tabs have all direct delegated filters',()=>sup.includes('إشرافي المباشر')&&sup.includes('المتابعة المفوضة')&&sup.includes('الكل')],
+ ['Supervision tracks each station not just latest project',()=>sup.includes('loadProjectFollowup')&&followup.includes('for(const m of mrows)')&&followup.includes('latestByMilestone')],
+ ['Supervision first and second requests have loading and error states',()=>sup.includes('جارٍ الحفظ')&&sup.includes('setError(')&&sup.includes('setNotice(')&&sup.includes('disabled={sending}')],
  ['Secretary controls on project include close and assignment',()=>project.includes('v57-project-tools')&&project.includes('assignment-manage')&&project.includes('closure-request')],
  ['Project completion remains a manual lifecycle decision',()=>wf.includes("actionName==='PROJECT_CLOSE_DECIDE'")],
  ['Date-only postpone front and backend validated',()=>project.includes('type="date"')&&wf.includes('postponeUntilDate')],

@@ -10,6 +10,7 @@ const sql=get('KMSA_V5_6_UPGRADE.sql');
 const project=get('apps/web/src/pages/WorkspaceProjectPage.tsx');
 const projects=get('apps/web/src/pages/WorkspaceProjectsPage.tsx');
 const desk=get('apps/web/src/pages/WorkspaceSupervisionPage.tsx');
+const followup=get('apps/web/src/lib/projectFollowup.ts');
 const api=get('apps/web/src/lib/api.ts');
 const shell=get('apps/web/src/components/AppShell.tsx');
 const tests=[
@@ -31,9 +32,9 @@ const tests=[
  ['Only secretary may delegate/reassign direct supervision',()=>workflow.includes("تغيير المتابع المباشر من اختصاص السكرتير فقط")],
  ['No deputy reviews own work',()=>workflow.includes("selected===init.owner_id&&selected!==init.secretary_id")],
  ['Delegation reassignment preserves previous supervisor in audit',()=>workflow.includes('previous_supervisor_id:oldSupervisor')],
- ['Delegated old updates are not wrongly attributed to new supervisor',()=>monitor.includes('delegation.assigned_at')&&desk.includes('delegated.assigned_at')],
+ ['Delegated old updates are not wrongly attributed to new supervisor',()=>monitor.includes('delegation.assigned_at')&&followup.includes('const accountable=!!activity')&&followup.includes('a?.assigned_at')],
  ['Secretary has explicit follow-through action with due time',()=>workflow.includes("actionName==='PROJECT_SUPERVISION_FOLLOWUP'")&&workflow.includes('followup_due_at:due')],
- ['Follow-ups never erase pending review automatically',()=>desk.includes('يستمر ظهورها حتى وصول تقييم فعلي')],
+ ['Follow-ups never erase pending review automatically',()=>followup.includes("else if(activity&&!review)")&&followup.includes("issue=resultReady?'RESULT_REVIEW':'UNREVIEWED'")&&desk.includes('لا يعتبر الطلب تقييمًا')],
  ['Monitoring escalates overdue follow-through to secretary',()=>monitor.includes('DELEGATED_REVIEW_REQUEST_SECOND')&&monitor.includes('DELEGATED_REVIEW_ESCALATION')],
  ['Postponed projects do not produce false active-work reminders',()=>monitor.includes("project.lifecycle_state==='POSTPONED'")],
  ['Projects and delegated supervision share one section',()=>projects.includes('WorkspaceSupervisionPage')&&projects.includes('v57-project-tabs')],

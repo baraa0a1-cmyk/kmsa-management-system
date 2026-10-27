@@ -7,13 +7,14 @@ const project=get('apps/web/src/pages/WorkspaceProjectPage.tsx');
 const shell=get('apps/web/src/components/AppShell.tsx');
 const home=get('apps/web/src/pages/WorkspaceHomePage.tsx');
 const desk=get('apps/web/src/pages/WorkspaceSupervisionPage.tsx');
+const followup=get('apps/web/src/lib/projectFollowup.ts');
 const api=get('apps/web/src/lib/api.ts');
 const workflow=get('supabase/functions/workflow/index.ts');
 const styles=get('apps/web/src/styles.css');
 const app=get('apps/web/src/App.tsx');
 let n=0,errors=0;
 function test(name,ok){n++;if(!ok)errors++;console.log(`${ok?'PASS':'FAIL'} ${name}`)}
-test('Current progress review bound strictly to latest update',project.includes('const lastProgress=!completed&&lastUpdate')&&!project.includes('const lastProgress=events.find'));
+test('Current progress review bound strictly to latest update',project.includes('const lastProgress=events.find')&&project.includes('e.source_activity_id===lastProgress?.id')&&project.includes('e.source_activity_id===resultUpdate?.id'));
 test('New progress shows new review action',project.includes('lastProgress&&!progressReview')&&project.includes('تحديث جديد · لم يُقيّم'));
 test('Server rejects stale review race',workflow.includes('expectedSourceActivityId!==sourceId'));
 test('Review submission passes expected update ID',project.includes('expectedSourceActivityId:activities.find'));
@@ -29,10 +30,10 @@ test('KMSA brand logo on persistent topbar',shell.includes('v55-top-logo')&&shel
 test('Single Member Portal shortcut in workspace chrome',shell.includes('v55-member-shortcut')&&!shell.includes('className="workspace-back-member"'));
 test('Notifications anchored to viewport',styles.includes('.notification-popover{position:fixed!important'));
 test('Home action lists grouped by category',home.includes('v55-action-groups')&&home.includes('v55-action-card'));
-test('Home new review actions included',home.includes('workspaceReviewerQueue')&&home.includes('reviewQueue'));
+test('Home new review actions included',home.includes('loadProjectFollowup')&&home.includes('setReviewQueue(waiting.map'));
 test('Home failures surfaced, not replaced with all-clear',home.includes('النتائج الظاهرة قد تكون غير مكتملة'));
 test('Secretary supervision is reachable inside Projects',app.includes('/workspace/projects?tab=supervision')&&get('apps/web/src/pages/WorkspaceProjectsPage.tsx').includes('WorkspaceSupervisionPage')); 
-test('Delegation displayed and reviewer matched to source update',desk.includes('project_supervision_assignments')&&desk.includes('source_activity_id===latest.id'));
+test('Delegation displayed and reviewer matched to source update',desk.includes('loadProjectFollowup')&&followup.includes("readAll('project_supervision_assignments'")&&followup.includes('const review=accountable?reviewedBySource')&&followup.includes('activity.id'));
 test('Activity versions remain in event log',project.includes('projectTimeline')&&project.includes('project-log'));
 test('No new org chart or mandatory reports',!existsSync(join(root,'apps/web/src/pages/WorkspaceStructurePage.tsx'))&&!desk.includes('يومي إلزامي'));
 console.log(`v5.5: ${n} checks; ${errors} failed`);

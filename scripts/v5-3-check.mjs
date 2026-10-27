@@ -21,7 +21,7 @@ const rules=[
  ['Eight-column sheet with separate reviews',ui.includes('<th>تقييم التحديث</th>')&&ui.includes('<th>تقييم النتيجة</th>')&&ui.includes('<th>ملاحظات المشرف</th>')&&ui.includes('<th>آخر ما حدث</th>')],
  ['Inline status dropdown opens modal',ui.includes('onChange={e=>openUpdate(m,e.target.value as MilestoneStatus)}')],
  ['Completed status needs concrete result',ui.includes('وصف النتيجة المتحققة ضروري')&&wf.includes('اكتب المخرج الفعلي')],
- ['Progress and result review choices match requirements',ui.includes('يحتاج متابعة')&&ui.includes('النتيجة مناسبة')&&ui.includes('تحتاج تعديلًا')],
+ ['Progress and result review choices match requirements',ui.includes('التقدم غير كافٍ')&&ui.includes('النتيجة مناسبة')&&ui.includes('تحتاج تعديلًا')&&ui.includes("'PROGRESS_UNCLEAR'")],
  ['Project history is available on the top card',ui.includes('سجل المشروع الكامل')&&ui.includes("modal==='project-log'")],
  ['History includes supervision and deadline events',ui.includes('bundle?.supervisionEvents')&&ui.includes('bundle?.deadlineRequests')],
  ['History includes archived evidence',ui.includes('bundle?.evidence')&&ui.includes('projectTimeline.map')],

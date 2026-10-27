@@ -22,7 +22,7 @@ check('Project health is server-derived and blockers take precedence',
   healthCalculator.includes(".eq('status','OPEN')") &&
   healthCalculator.includes("m.status==='BLOCKED'") &&
   healthCalculator.indexOf("return 'BLOCKED'") < healthCalculator.lastIndexOf("return 'ON_TRACK'") &&
-  workflow.includes('const health=await computedProjectHealth(db,init.id)') &&
+  /const (?:health|hh)=await computedProjectHealth\(db,init\.id\)/.test(workflow) &&
   !workflow.includes('const health=payload.health'));
 
 check('Cancelled milestones never count as completed',workflow.includes("active.every((m:any)=>['READY_FOR_VERIFICATION','VERIFIED'].includes(m.status))"));

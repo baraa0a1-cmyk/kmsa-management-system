@@ -16,7 +16,7 @@ const checks = [
  ['Secretary action has approval phase guard',/PROJECT_INTERVENTION_ADD[\s\S]*?approval_status!=='APPROVED'/.test(wf)],
  ['Verified milestone protected from silent rollback',/مغلقة ولا يمكن تغييرها/.test(wf)],
  ['Deputy self-review blocked; secretary exception explicit',/function reviewIdentityAllowed/.test(wf)&&/profile.id===init.secretary_id/.test(wf)&&/profile.role==='SECRETARY'/.test(wf)],
- ['Health derived from actual milestone and blocker facts',/async function computedProjectHealth/.test(wf)&&/const health=await computedProjectHealth/.test(wf)],
+ ['Health derived from actual milestone and blocker facts',/async function computedProjectHealth/.test(wf)&&/const (?:health|hh)=await computedProjectHealth/.test(wf)],
  ['Pulse does not require nextStep or assistance',!(/if\(!String\(payload.nextStep/.test(wf))],
  ['Immutable project activity rows protected by RLS',/create policy project_activity_entries_read/.test(sql)&&!/grant (insert|update|delete)/i.test(sql)],
  ['Activity records visible to role authorized to view initiative',/can_read_initiative\(initiative_id\)/.test(sql)],
