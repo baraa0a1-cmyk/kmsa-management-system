@@ -1,8 +1,7 @@
 // KMSA v6.4 — static contract regression checks. NOT a substitute for live Supabase tests.
 import fs from 'node:fs';
-import path from 'node:path';
-const root=process.cwd();
-const read=p=>fs.readFileSync(path.join(root,p),'utf8');
+// Resolve sources relative to this script, not the GitHub Actions working-directory.
+const read=p=>fs.readFileSync(new URL('../'+p,import.meta.url),'utf8');
 const files={sql:read('supabase/migrations/0023_milestone_followup_v6_4.sql'),workflow:read('supabase/functions/workflow/index.ts'),api:read('apps/web/src/lib/api.ts'),follow:read('apps/web/src/lib/projectFollowup.ts'),projects:read('apps/web/src/pages/WorkspaceProjectsPage.tsx'),supervision:read('apps/web/src/pages/WorkspaceSupervisionPage.tsx'),detail:read('apps/web/src/pages/WorkspaceProjectPage.tsx'),home:read('apps/web/src/pages/WorkspaceHomePage.tsx'),style:read('apps/web/src/styles.css')};
 const results=[];const test=(label,pass)=>{results.push([label,pass]);console.log(`${pass?'PASS':'FAIL'} ${label}`)};
 const has=(file,phrase)=>files[file].includes(phrase);
