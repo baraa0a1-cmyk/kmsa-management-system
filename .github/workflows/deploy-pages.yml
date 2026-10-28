@@ -63,6 +63,8 @@ jobs:
         run: node ../../scripts/v6-4-flow-smoke.mjs
       - name: Verify v6.5 independent supervision and pause safety
         run: node ../../scripts/v6-5-check.mjs
+      - name: Verify v6.6 notifications, actions and interface
+        run: node ../../scripts/v6-6-check.mjs
       - name: Build
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}

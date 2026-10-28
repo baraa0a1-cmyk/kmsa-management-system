@@ -192,6 +192,10 @@ async function kmsaCompatTable(table:string, select='*') {
 export async function notificationFeed(limit=30): Promise<any[]> {
   // v5.4: The installed SQL exposes user_notification_feed, not notification_feed.
   const count=Math.max(1,Math.min(100,limit));
+  const modern=await supabase.rpc('user_notification_feed_v66',{p_limit:count});
+  if(!modern.error)return (Array.isArray(modern.data)?modern.data:modern.data?.items||[]) as any[];
+  const modernMissing=modern.error.code==='PGRST202'||modern.error.code==='42883'||/not found|does not exist/i.test(modern.error.message||'');
+  if(!modernMissing)throw modern.error;
   const {data,error}=await supabase.rpc('user_notification_feed',{p_limit:count});
   if(!error)return (Array.isArray(data)?data:data?.items||[]) as any[];
   const missing=error.code==='PGRST202'||error.code==='42883'||/not found|does not exist/i.test(error.message||'');

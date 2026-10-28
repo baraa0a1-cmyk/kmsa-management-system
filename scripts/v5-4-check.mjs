@@ -8,6 +8,7 @@ const wf=read('supabase/functions/workflow/index.ts');
 const common=read('supabase/functions/_shared/common.ts');
 const api=read('apps/web/src/lib/api.ts');
 const shell=read('apps/web/src/components/AppShell.tsx');
+const bell=read('apps/web/src/components/NotificationBell.tsx');
 const home=read('apps/web/src/pages/WorkspaceHomePage.tsx');
 const css=read('apps/web/src/styles.css');
 const checks=[
@@ -30,8 +31,8 @@ const checks=[
  ['Database mutation success separate from refresh failure',ui.includes('تم حفظ الإجراء، لكن تعذر تحديث العرض')],
  ['Update request is routed to actual backend action',ui.includes("act('MILESTONE_UPDATE_REQUEST'")&&wf.includes("kind==='UPDATE_REQUEST'")],
  ['Notification RPC uses installed actual function',api.includes("supabase.rpc('user_notification_feed'")],
- ['Notification failures are not silently converted into an empty inbox',api.includes('if(!missing)throw error')&&shell.includes("setError(e?.message||'تعذر جلب الإشعارات')")],
- ['Notifications refresh after returning to app',shell.includes("window.addEventListener('focus',onFocus)")&&shell.includes('60000')],
+ ['Notification failures are not silently converted into an empty inbox',api.includes('if(!missing)throw error')&&bell.includes("setError(e?.message||'تعذر جلب الإشعارات')")],
+ ['Notifications refresh after returning to app',bell.includes("window.addEventListener('focus',onFocus)")&&bell.includes('45000')],
  ['Mark-read checks DB update failure',wf.includes('if(q.error)throw q.error;return json({ok:true});')],
  ['Home does not flag obsolete periodic report',!home.includes('تحديثك الدوري متأخر')&&!home.includes('تحديث المسؤول الدوري متأخر')],
  ['Compact, sticky, scrollable sheet plus modal styling',css.includes('.v54-scroll')&&css.includes('position:sticky')&&css.includes('.workspace-shell .modal')],

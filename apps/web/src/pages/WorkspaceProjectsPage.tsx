@@ -35,7 +35,7 @@ export default function WorkspaceProjectsPage(){
   if(live)setPendingDecisions(pending);
   // Shared v6.4 read model: the counter and the actual supervision page use identical rules.
   const [summary,overview]=await Promise.all([loadProjectFollowup(scoped,profile.id),loadSupervisionOverview(scoped,profile.id)]);
-  if(live){setSnapshot(summary);setSupervisionCount(overview.filter(x=>x.lateChecks||x.lateReports>0||x.pausePending||x.openActions.some(y=>new Date(y.due_at).getTime()<Date.now())).length);}
+  if(live){setSnapshot(summary);setSupervisionCount(overview.filter(x=>x.lateChecks||x.lateReports>0||x.pausePending||x.openActions.some(y=>new Date(y.due_at).getTime()<Date.now())||x.active.some(m=>!!m.update&&!m.review&&(m.supervisorId===profile.id||!!m.reviewDueAt&&new Date(m.reviewDueAt).getTime()<Date.now()))).length);}
  }).catch(e=>{if(live){setError(e?.message||'تعذر جلب قائمة المشاريع.');setBusy(false)}});return()=>{live=false};},[profile?.id,profile?.secretariat_id,profile?.role,hasSupervision,tab,refreshRevision]);
  useEffect(()=>{setOwnersOpen(false);setSupervisorsOpen(false)},[tab]);
  useEffect(()=>{const dismiss=(e:PointerEvent)=>{if(!ownerWrap.current?.contains(e.target as Node))setOwnersOpen(false);if(!supervisorWrap.current?.contains(e.target as Node))setSupervisorsOpen(false)};

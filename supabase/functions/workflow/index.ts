@@ -61,6 +61,14 @@ async function queueNotice(db:any,event:string,entityType:string,entityId:string
  }
  if(entityType==='INITIATIVE'&&event==='PROJECT_PENDING_GS'){const init=(await db.from('initiatives').select('id,title').eq('id',entityId).maybeSingle()).data;const gsIds=((await db.from('profiles').select('id').eq('role','GS').eq('active',true)).data||[]).map((x:any)=>x.id);for(const id of gsIds)await inboxNotify(db,id,event,`قرار تكليف بانتظار الاعتماد: ${init?.title||'مشروع'}`,null,'INITIATIVE',entityId,`/workspace/projects/${entityId}`)}
 }
+// Reading an alert does not complete it. Resolve only after a successful matching operation.
+async function completeNotificationActions(db:any,profileId:string,eventTypes:string[],entityType:string,entityId:string){
+ if(!profileId||!entityId||!eventTypes.length)return;
+ const q=await db.from('user_notifications').update({resolved_at:new Date().toISOString(),resolution_kind:'COMPLETED',read_at:new Date().toISOString()})
+  .eq('profile_id',profileId).eq('entity_type',entityType).eq('entity_id',entityId)
+  .in('event_type',eventTypes).is('resolved_at',null);
+ if(q.error)console.error('Notification completion pending retry',q.error);
+}
 async function getInitiative(db:any,id:string){const {data,error}=await db.from('initiatives').select('*').eq('id',id).single();if(error)throw error;const current=(await db.from('cycles').select('id').eq('is_current',true).single()).data?.id;if(!current||data.cycle_id!==current)throw new Error('هذا المشروع يتبع دورة مؤرشفة ولا يمكن تعديله.');return data}
 async function getResult(db:any,id:string){const {data,error}=await db.from('results').select('*,initiative:initiatives(*)').eq('id',id).single();if(error)throw error;const active=(await db.from('cycles').select('id').eq('is_current',true).single()).data?.id;if(!active||data?.initiative?.cycle_id!==active)throw new Error('هذا العمل تابع لدورة سابقة، وهو محفوظ للعرض فقط.');return data}
 function canSuperviseProject(profile:any,initiative:any){return initiative.secretary_id===profile.id||(profile.role==='SECRETARY'&&profile.secretariat_id===initiative.secretariat_id)}
@@ -539,7 +547,7 @@ Deno.serve(async(req)=>{
    // A secretary who intervenes may verify directly. It never counts as the deputy's own 12h check.
    if(supervisor===profile.id){const x=await db.rpc('kmsa_v65_register_check',{p_project:init.id,p_supervisor:profile.id,p_checked_at:result.data.created_at});if(x.error)throw x.error;}
    if(finding!=='ON_TRACK'&&init.owner_id){await inboxNotify(db,init.owner_id,'SUPERVISION_CHECK',`مشروع ${init.title}: متابعة تنفيذ`,`${note} · الخطوة المطلوبة: ${nextStep}`,'INITIATIVE',init.id,`/workspace/projects/${init.id}`);}
-   await audit(db,profile,'PROJECT_SUPERVISION_CHECK_ADD','INITIATIVE',init.id,null,result.data);
+   await completeNotificationActions(db,profile.id,['REQUEST_SUPERVISION_CHECK'],'INITIATIVE',init.id);await audit(db,profile,'PROJECT_SUPERVISION_CHECK_ADD','INITIATIVE',init.id,null,result.data);
    return json({ok:true,check:result.data});
   }
   if(actionName==='PROJECT_SUPERVISION_ACTION_RESOLVE'){
@@ -588,6 +596,7 @@ Deno.serve(async(req)=>{
    const init=await getInitiative(db,item.initiative_id);
    if(!(profile.role==='ADMIN'||(profile.role==='SECRETARY'&&init.secretary_id===profile.id)))throw new Error('اعتماد الإيقاف المؤقت من صلاحية السكرتير.');
    const x=await db.rpc('kmsa_v65_decide_pause',{p_id:item.id,p_actor:profile.id,p_accept:payload.approve===true,p_note:String(payload.note||'')});if(x.error)throw x.error;
+   await completeNotificationActions(db,profile.id,['PROJECT_PAUSE_PENDING'],'INITIATIVE',init.id);
    if(item.requested_by!==profile.id)await inboxNotify(db,item.requested_by,'PROJECT_PAUSE_DECIDED',`مشروع ${init.title}: ${payload.approve?'اعتُمد':'رُفض'} طلب التوقف المؤقت`,'راجع حالة المشروع.','INITIATIVE',init.id,`/workspace/projects/${init.id}`);
    return json({ok:true});
   }
@@ -783,7 +792,9 @@ Deno.serve(async(req)=>{
     }
    }
    const reviewLabel=({PROGRESS_OK:'التقدم مناسب',PROGRESS_FOLLOW_UP:'التقدم غير كافٍ',PROGRESS_UNCLEAR:'التقدم غير واضح — مطلوب توضيح',RESULT_OK:'النتيجة مناسبة',RESULT_REVISION:'النتيجة تحتاج تعديلًا'} as Record<string,string>)[reviewKind];
-   const notificationSent=await inboxNotify(db,m.owner_id,`MILESTONE_REVIEW_${reviewKind}`,`مشروع ${init.title}: ${isResult?'تقييم نتيجة':'تقييم تقدم'} «${m.title}»`,(note?`${reviewLabel}: ${note}`:reviewLabel)+(correctionDueAt?` · متابعة التصحيح قبل ${correctionDueAt}`:'')+(reviewKind==='RESULT_REVISION'?' · المطلوب: عدّل وصف النتيجة أو مخرجها.':['PROGRESS_FOLLOW_UP','PROGRESS_UNCLEAR'].includes(reviewKind)?' · المطلوب: وضح ما تحقق وحدّث المحطة وفق توجيه المشرف.':''),'MILESTONE',m.id,`/workspace/projects/${init.id}?milestone=${m.id}&action=update`);
+   const notificationSent=await inboxNotify(db,m.owner_id,`MILESTONE_REVIEW_${reviewKind}`,`مشروع ${init.title}: ${isResult?'تقييم نتيجة':'تقييم تقدم'} «${m.title}»`,(note?`${reviewLabel}: ${note}`:reviewLabel)+(correctionDueAt?` · متابعة التصحيح قبل ${correctionDueAt}`:'')+(reviewKind==='RESULT_REVISION'?' · المطلوب: عدّل وصف النتيجة أو مخرجها.':['PROGRESS_FOLLOW_UP','PROGRESS_UNCLEAR'].includes(reviewKind)?' · المطلوب: وضح ما تحقق وحدّث المحطة وفق توجيه المشرف.':''),'MILESTONE',m.id,`/workspace/projects/${init.id}?milestone=${m.id}${requiresCorrection?'&action=update':''}`);
+   await completeNotificationActions(db,profile.id,['PROJECT_PROGRESS_UPDATED','PROJECT_RESULT_READY','SUPERVISION_REVIEW_REQUEST_1','SUPERVISION_REVIEW_REQUEST_2'],'MILESTONE',m.id);
+   await completeNotificationActions(db,profile.id,['PROJECT_PROGRESS_UPDATED','PROJECT_RESULT_READY','SUPERVISION_REVIEW_REQUEST_1','SUPERVISION_REVIEW_REQUEST_2'],'ACTIVITY',sourceId);
    await audit(db,profile,'MILESTONE_QUALITY_REVIEW','MILESTONE',m.id,null,q.data,{source_activity_id:sourceId});
    return json({ok:true,review:q.data,notificationSent,warning:!notificationSent?'حُفظ التقييم، لكن تعذر إرسال الإشعار للمسؤول.':null});
   }
@@ -811,7 +822,7 @@ Deno.serve(async(req)=>{
    if(approved){const u=await db.from('milestones').update({due_at:q.proposed_due_at,deadline_mode:'ABSOLUTE',relative_to_milestone_id:null,relative_days:null,relative_hours:0,status_updated_at:new Date().toISOString()}).eq('id',m.id);if(u.error)throw u.error;await recalcDependentMilestones(db,m.id);}
    const upd=await db.from('milestone_deadline_requests').update({status:approved?'APPROVED':'REJECTED',decided_by:profile.id,decided_at:new Date().toISOString(),decision_note:String(payload.note||'').trim()||null}).eq('id',q.id).eq('status','PENDING').select().single();if(upd.error)throw upd.error;
    await inboxNotify(db,q.requested_by,approved?'DEADLINE_APPROVED':'DEADLINE_REJECTED',`مشروع ${init.title}: ${approved?'قُبل':'رُفض'} تغيير موعد «${m.title}»`,approved?'تم اعتماد الموعد الجديد. راجع موعد المحطة في جدول المشروع.':'لم يُعتمد الموعد المطلوب. استمر وفق الموعد الحالي أو راجع ملاحظة المشرف.','MILESTONE',m.id,`/workspace/projects/${init.id}?milestone=${m.id}&action=deadline`);
-   await audit(db,profile,actionName,'MILESTONE',m.id,q,upd.data);return json({ok:true,request:upd.data});
+   await completeNotificationActions(db,profile.id,['DEADLINE_CHANGE_REQUEST'],'MILESTONE',m.id);await audit(db,profile,actionName,'MILESTONE',m.id,q,upd.data);return json({ok:true,request:upd.data});
   }
 
   if(actionName==='MILESTONE_PROGRESS_UPDATE'){
@@ -824,6 +835,10 @@ Deno.serve(async(req)=>{
    const saved=await db.rpc('kmsa_v65_save_milestone_progress',{p_milestone:m.id,p_author:profile.id,p_status:status,p_note:incomingNote||null,p_outcome:nextOutcome,p_update_type:updateType,p_next_step:nextStep||null});
    if(saved.error)throw saved.error;
    const u={data:saved.data.milestone};
+   await completeNotificationActions(db,profile.id,[
+    'MILESTONE_UPDATE_REQUEST','MILESTONE_REVIEW_PROGRESS_FOLLOW_UP','MILESTONE_REVIEW_PROGRESS_UNCLEAR','MILESTONE_REVIEW_RESULT_REVISION'
+   ],'MILESTONE',m.id);
+
    let reviewerNotified=true;
    try{
     const hh=await computedProjectHealth(db,init.id);
@@ -842,7 +857,7 @@ Deno.serve(async(req)=>{
      reviewerNotified=await inboxNotify(db,reviewerId,status==='READY_FOR_VERIFICATION'?'PROJECT_RESULT_READY':'PROJECT_PROGRESS_UPDATED',
       `مشروع ${init.title}: ${status==='READY_FOR_VERIFICATION'?'نتيجة جديدة':'تحديث جديد'} في «${m.title}»`,
       status==='READY_FOR_VERIFICATION'?'المطلوب منك: راجع النتيجة المسجلة وقيّم جودتها.':`المطلوب منك: راجع التقدم الأخير وقيّمه. ${String(payload.leadNote||'').trim()}`,
-      'MILESTONE',m.id,`/workspace/projects/${init.id}?milestone=${m.id}&action=review`);
+      'ACTIVITY',entry.data.id,`/workspace/projects/${init.id}?milestone=${m.id}&action=review`);
     }
     const requests=(await db.from('milestone_supervision_events').select('id,created_at').eq('milestone_id',m.id).eq('event_type','UPDATE_REQUEST').order('created_at',{ascending:false}).limit(1)).data||[];
     if(requests.length&&new Date(requests[0].created_at).getTime()<Date.now()){

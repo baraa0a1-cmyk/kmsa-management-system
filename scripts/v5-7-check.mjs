@@ -14,6 +14,7 @@ const dec=read('apps/web/src/pages/WorkspaceProjectDecisionsPage.tsx');
 const project=read('apps/web/src/pages/WorkspaceProjectPage.tsx');
 const gs=read('apps/web/src/pages/WorkspaceOversightPage.tsx');
 const shell=read('apps/web/src/components/AppShell.tsx');
+const bell=read('apps/web/src/components/NotificationBell.tsx');
 const tests=[
  ['New migration numbered after v5.6',()=>existsSync(join(root,'supabase/migrations/0016_review_requests_and_date_only_postponement_v5_7.sql'))],
  ['Two request attempts bounded by DB constraint',()=>sql.includes('BETWEEN 1 AND 2')],
@@ -43,7 +44,7 @@ const tests=[
  ['Supervision first and second requests have loading and error states',()=>sup.includes('جارٍ الإرسال')&&sup.includes('setError(')&&sup.includes('setNotice(')&&sup.includes('disabled={working===')],
  ['Secretary controls on project include close and assignment',()=>project.includes('v57-project-tools')&&project.includes('assignment-manage')&&project.includes('closure-request')],
  ['Project completion remains a manual lifecycle decision',()=>wf.includes("actionName==='PROJECT_CLOSE_DECIDE'")],
- ['Date-only postpone front and backend validated',()=>project.includes('type="date"')&&wf.includes('postponeUntilDate')],
+ ['Date-only postpone front and backend validated',()=>project.includes('<KmsaDateTimePicker dateOnly')&&wf.includes('postponeUntilDate')],
  ['Secretary own closure label does not claim pending send',()=>project.includes('اعتماد القرار الآن')],
  ['Closure request modal shows saving',()=>project.includes('جارٍ إرسال القرار وتحديث السجل')],
  ['Decisions list links direct to decision dialog',()=>dec.includes('?action=closure')],
@@ -51,7 +52,7 @@ const tests=[
  ['My assigned projects filter present',()=>p.includes('المسؤول عنها أنا')],
  ['Several responsible persons can be filtered at once',()=>p.includes('type="checkbox"')&&p.includes('owners.includes(o.id)')],
  ['Secretariat rather than generic association appears in workspace title',()=>shell.includes('profile.secretariat?.name_ar')],
- ['Notification popover closes when navigating',()=>shell.includes('setOpen(false)},[pathname]')],
+ ['Notification popover closes when navigating',()=>bell.includes('setOpen(false);void load()},[pathname]')],
  ['GS sees aggregated gaps without deputy messages',()=>gs.includes('supervisionGaps')&&gs.includes('secretaryActionMissing')],
  ['SQL and edge functions not directly exposing service-role RPC to members',()=>sql.includes('GRANT EXECUTE')&&sql.includes('TO service_role')],
 ];

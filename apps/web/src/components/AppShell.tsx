@@ -1,12 +1,11 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Bell, BriefcaseBusiness, ClipboardCheck, ClipboardList, FileText, Gauge, Gavel, HandHeart, Home, LogOut, Megaphone, Menu, Radar, RefreshCw, Target, UserRound, Users, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { signOut } from '../lib/auth';
 import { profileTitle } from '../lib/labels';
 import { supabase } from '../lib/supabase';
-import { notificationFeed, workflow } from '../lib/api';
-import type { UserNotification } from '../lib/types';
+import { NotificationBell } from './NotificationBell';
 
 const memberItems=[
  {to:'/',label:'الرئيسية',icon:Home},
@@ -27,18 +26,6 @@ const workspaceItems=[
  {to:'/workspace/admin',label:'إدارة النظام',icon:Users,roles:['ADMIN']},
 ];
 
-
-function NotificationBell(){
- const wrapRef=useRef<HTMLDivElement|null>(null);
- const {pathname}=useLocation();
- const [anchor,setAnchor]=useState<{top:number,left:number}>({top:65,left:12});
- const nav=useNavigate();const [open,setOpen]=useState(false);const [items,setItems]=useState<UserNotification[]>([]);const [error,setError]=useState('');
- useEffect(()=>{setOpen(false)},[pathname]);
- useEffect(()=>{if(!open)return;const closeOutside=(e:PointerEvent)=>{if(!wrapRef.current?.contains(e.target as Node))setOpen(false)};const closeEsc=(e:KeyboardEvent)=>{if(e.key==='Escape')setOpen(false)};document.addEventListener('pointerdown',closeOutside);document.addEventListener('keydown',closeEsc);return()=>{document.removeEventListener('pointerdown',closeOutside);document.removeEventListener('keydown',closeEsc)}},[open]);
- async function load(){try{setError('');setItems(await notificationFeed(30) as UserNotification[])}catch(e:any){setError(e?.message||'تعذر جلب الإشعارات')}}
- useEffect(()=>{void load();const tick=window.setInterval(()=>{if(document.visibilityState==='visible')void load()},60000);const onFocus=()=>void load();window.addEventListener('focus',onFocus);return()=>{window.clearInterval(tick);window.removeEventListener('focus',onFocus)}},[]);const unread=items.filter(x=>!x.read_at).length;
- return <div ref={wrapRef} className="notification-wrap"><button className="member-icon-button notification-button" aria-label="الإشعارات" onClick={e=>{const b=e.currentTarget.getBoundingClientRect();const width=Math.min(405,window.innerWidth-24);setAnchor({top:b.bottom+10,left:Math.max(12,Math.min(window.innerWidth-width-12,b.left+b.width/2-width/2))});setOpen(!open);if(!open)load()}}><Bell size={19}/>{unread>0&&<b>{unread>9?'9+':unread}</b>}</button>{open&&<div className="notification-popover" style={{position:'fixed',top:anchor.top,left:anchor.left,right:'auto',width:'min(405px, calc(100vw - 24px))'}}><div className="notification-head"><strong>الإشعارات</strong>{unread>0&&<button onClick={async()=>{await workflow('NOTIFICATION_MARK_ALL_READ');await load()}}>تحديد الكل كمقروء</button>}</div><div className="notification-list">{error&&<div className="member-form-error" role="alert">{error}<button onClick={()=>void load()}>إعادة المحاولة</button></div>}{items.length?items.map(n=><button key={n.id} className={n.read_at?'':'unread'} onClick={async()=>{try{if(!n.read_at)await workflow('NOTIFICATION_MARK_READ',{notificationId:n.id});setOpen(false);if(n.action_path)nav(n.action_path);else await load()}catch(e:any){setError(e?.message||'تعذر فتح الإشعار')}}}><span/><div><strong>{n.title}</strong>{n.body&&<p>{n.body}</p>}<small>{new Intl.DateTimeFormat('ar-SD',{dateStyle:'short',timeStyle:'short'}).format(new Date(n.created_at))}</small></div></button>):<div className="notification-empty">لا توجد إشعارات جديدة.</div>}</div></div>}</div>
-}
 
 function MemberShell(){
  const {profile}=useAuth(); const nav=useNavigate(); const {pathname}=useLocation(); const [assigned,setAssigned]=useState(false);
@@ -77,20 +64,20 @@ function MemberShell(){
 }
 
 
-function AdminShell(){const nav=useNavigate();const {profile}=useAuth();return <div className="v59-admin-shell" dir="rtl"><header className="v59-admin-top"><div className="v59-admin-brand"><img src={`${import.meta.env.BASE_URL}kmsa-logo.png`} alt="شعار رابطة طلاب كلية الطب"/><div><strong>رابطة طلاب كلية الطب</strong><small>جامعة الخرطوم · إدارة النظام</small></div></div><div className="v59-admin-account"><span>{profile?.full_name||'مدير النظام'}</span><button onClick={()=>nav('/change-password')}><UserRound size={16}/> كلمة المرور</button><button onClick={async()=>{await signOut();nav('/login')}}><LogOut size={16}/> خروج</button></div></header><main className="v59-admin-main"><Outlet/></main></div>}
+function AdminShell(){const nav=useNavigate();const {profile}=useAuth();return <div className="v59-admin-shell" dir="rtl"><header className="v59-admin-top"><div className="v59-admin-brand"><NavLink to="/workspace/admin" title="العودة لإدارة النظام"><img src={`${import.meta.env.BASE_URL}kmsa-logo.png`} alt="شعار رابطة طلاب كلية الطب"/></NavLink><div><strong>رابطة طلاب كلية الطب</strong><small>جامعة الخرطوم · إدارة النظام</small></div></div><div className="v59-admin-account"><span>{profile?.full_name||'مدير النظام'}</span><button onClick={()=>nav('/change-password')}><UserRound size={16}/> كلمة المرور</button><button onClick={async()=>{await signOut();nav('/login')}}><LogOut size={16}/> خروج</button></div></header><main className="v59-admin-main"><Outlet/></main></div>}
 
 function WorkspaceShell(){
  const {profile}=useAuth(); const nav=useNavigate(); const [open,setOpen]=useState(false); const {pathname}=useLocation(); if(!profile)return null;
  const allowed=workspaceItems.filter(i=>i.roles.includes(profile.role));
  return <div className="workspace-shell">
   <aside className={`workspace-sidebar ${open?'workspace-sidebar-open':''}`}>
-   <div className="workspace-brand"><img src={`${import.meta.env.BASE_URL}kmsa-logo.png`} alt="KMSA"/><div><strong>مساحة العمل</strong><span>{profileTitle(profile)}</span></div><button className="mobile-close v55-close" aria-label="إغلاق القائمة" onClick={()=>setOpen(false)}><X/></button></div>
+   <div className="workspace-brand"><NavLink to="/workspace" onClick={()=>setOpen(false)} title="الرئيسية"><img src={`${import.meta.env.BASE_URL}kmsa-logo.png`} alt="KMSA"/></NavLink><div><strong>مساحة العمل</strong><span>{profileTitle(profile)}</span></div><button className="mobile-close v55-close" aria-label="إغلاق القائمة" onClick={()=>setOpen(false)}><X/></button></div>
    <div className="workspace-user"><div>{profile.full_name.trim().charAt(0)}</div><span><strong>{profile.full_name}</strong><small>{profile.university_id||profileTitle(profile)}</small></span></div>
    <nav>{allowed.map(({to,label,icon:Icon})=><NavLink key={to} to={to} end={to==='/workspace'} onClick={()=>setOpen(false)} className={({isActive})=>isActive||(to!=='/workspace'&&pathname.startsWith(to))?'workspace-nav active':'workspace-nav'}><Icon size={18}/><span>{label}</span></NavLink>)}</nav>
    <div className="workspace-sidebar-bottom"><button className="workspace-nav" onClick={async()=>{await signOut();nav('/login')}}><LogOut size={18}/>تسجيل الخروج</button></div>
   </aside>
   {open&&<button aria-label="إغلاق القائمة الجانبية" className="mobile-overlay v55-overlay" onClick={()=>setOpen(false)}/>} 
-  <main className="workspace-main"><header className="workspace-topbar v55-topbar"><button className="menu-btn v55-nav-trigger" aria-label="فتح قائمة مساحة العمل" title="القائمة" onClick={()=>setOpen(true)}><Menu size={21}/></button><img className="v55-top-logo" src={`${import.meta.env.BASE_URL}kmsa-logo.png`} alt="شعار الرابطة"/><div className="v55-top-heading"><strong>{pathname.startsWith('/workspace/supervision')?'إشراف السكرتارية':pathname.startsWith('/workspace/projects')?'المشاريع':pathname.startsWith('/workspace/tasks')?'المهام':pathname.startsWith('/workspace/routine')?'العمل الدوري':pathname.startsWith('/workspace/proposals')?'المقترحات':pathname.startsWith('/workspace/reports')?'التقارير':'مساحة العمل'}</strong><span>{profile.secretariat?.name_ar||(['GS','PRESIDENT','ADMIN'].includes(profile.role)?'السكرتارية العامة':'رابطة طلاب كلية الطب — جامعة الخرطوم')}</span></div><div className="workspace-topbar-actions"><NotificationBell/><button className="workspace-home-chip v55-member-shortcut" onClick={()=>nav('/')}><Home size={16}/>بوابة العضو</button></div></header><div className="workspace-page"><Outlet/></div></main>
+  <main className="workspace-main"><header className="workspace-topbar v55-topbar"><button className="menu-btn v55-nav-trigger" aria-label="فتح قائمة مساحة العمل" title="القائمة" onClick={()=>setOpen(true)}><Menu size={21}/></button><NavLink to="/workspace" aria-label="العودة لرئيسية مساحة العمل" title="العودة لرئيسية مساحة العمل"><img className="v55-top-logo" src={`${import.meta.env.BASE_URL}kmsa-logo.png`} alt="شعار الرابطة"/></NavLink><div className="v55-top-heading"><strong>{pathname.startsWith('/workspace/supervision')?'إشراف السكرتارية':pathname.startsWith('/workspace/projects')?'المشاريع':pathname.startsWith('/workspace/tasks')?'المهام':pathname.startsWith('/workspace/routine')?'العمل الدوري':pathname.startsWith('/workspace/proposals')?'المقترحات':pathname.startsWith('/workspace/reports')?'التقارير':'مساحة العمل'}</strong><span>{profile.secretariat?.name_ar||(['GS','PRESIDENT','ADMIN'].includes(profile.role)?'السكرتارية العامة':'رابطة طلاب كلية الطب — جامعة الخرطوم')}</span></div><div className="workspace-topbar-actions"><NotificationBell/><button className="workspace-home-chip v55-member-shortcut" onClick={()=>nav('/')}><Home size={16}/>بوابة العضو</button></div></header><div className="workspace-page"><Outlet/></div></main>
  </div>
 }
 
