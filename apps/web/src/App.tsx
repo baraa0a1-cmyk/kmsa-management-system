@@ -21,6 +21,8 @@ import WorkspaceHomePage from './pages/WorkspaceHomePage';
 import WorkspaceProjectsPage from './pages/WorkspaceProjectsPage';
 import WorkspaceProjectCreatePage from './pages/WorkspaceProjectCreatePage';
 import WorkspaceProjectPage from './pages/WorkspaceProjectPage';
+import ProjectFlowHome from './features/project-flow/ProjectFlowHome';
+import ProjectFlowDetail from './features/project-flow/ProjectFlowDetail';
 import WorkspaceApprovalsPage from './pages/WorkspaceApprovalsPage';
 import WorkspaceOversightPage from './pages/WorkspaceOversightPage';
 import WorkspaceReportsPage from './pages/WorkspaceReportsPage';
@@ -51,9 +53,11 @@ export default function App(){return <AuthProvider><Routes>
 
   <Route path="/workspace" element={<WorkspaceOnly><WorkspaceHomePage/></WorkspaceOnly>}/>
   <Route path="/workspace/supervision" element={<SecretaryOrAbove><Navigate to="/workspace/projects?tab=supervision" replace/></SecretaryOrAbove>}/>
-  <Route path="/workspace/projects" element={<WorkspaceOnly><WorkspaceProjectsPage/></WorkspaceOnly>}/>
+  <Route path="/workspace/projects" element={<WorkspaceOnly><ProjectFlowHome/></WorkspaceOnly>}/>
+  <Route path="/workspace/projects/classic" element={<WorkspaceOnly><WorkspaceProjectsPage/></WorkspaceOnly>}/>
   <Route path="/workspace/projects/new" element={<SecretaryOrAdmin><WorkspaceProjectCreatePage/></SecretaryOrAdmin>}/><Route path="/workspace/projects/:id/edit" element={<SecretaryOrAdmin><WorkspaceProjectCreatePage/></SecretaryOrAdmin>}/>
-  <Route path="/workspace/projects/:id" element={<WorkspaceOnly><WorkspaceProjectPage/></WorkspaceOnly>}/>
+  <Route path="/workspace/projects/:id" element={<WorkspaceOnly><ProjectFlowDetail/></WorkspaceOnly>}/>
+  <Route path="/workspace/projects/:id/classic" element={<WorkspaceOnly><WorkspaceProjectPage/></WorkspaceOnly>}/>
   <Route path="/workspace/milestones/:id" element={<WorkspaceOnly><MilestonePage/></WorkspaceOnly>}/>
   <Route path="/workspace/approvals" element={<SecretaryOrAbove><WorkspaceApprovalsPage/></SecretaryOrAbove>}/>
   <Route path="/workspace/tasks" element={<WorkspaceOnly><WorkspaceTasksPage/></WorkspaceOnly>}/>
