@@ -1,5 +1,5 @@
-import fs from 'node:fs';import {createRequire} from 'node:module';import {pathToFileURL} from 'node:url';import {resolve} from 'node:path';
-const root=process.cwd();const read=p=>fs.readFileSync(resolve(root,p),'utf8');
+import fs from 'node:fs';import {createRequire} from 'node:module';import {fileURLToPath} from 'node:url';import {resolve} from 'node:path';
+const root=fileURLToPath(new URL('../',import.meta.url));const read=p=>fs.readFileSync(resolve(root,p),'utf8');
 const require=createRequire(import.meta.url);let ts;try{ts=require(resolve(root,'apps/web/node_modules/typescript'))}catch{ts=require('typescript')}
 const rules=read('apps/web/src/features/project-flow/flowRules.ts');const js=ts.transpileModule(rules,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2020}}).outputText;
 const m=await import('data:text/javascript;base64,'+Buffer.from(js).toString('base64'));
@@ -13,9 +13,9 @@ const checks=[
  ['No secretary blame before 24-hour grace',!m.secretaryHasMissedAction({due:plus(-10),now,delegated:true,latestCheck:null,secretaryAction:null})],
  ['Secretary accountability after missed delegated supervision',m.secretaryHasMissedAction({due:plus(-26),now,delegated:true,latestCheck:null,secretaryAction:null})],
  ['Direct secretary supervision not mistaken for deputization',!m.secretaryHasMissedAction({due:plus(-50),now,delegated:false,latestCheck:null,secretaryAction:null})],
- ['Secretary action with future review defers further blame',!m.secretaryHasMissedAction({due:plus(-30),now,delegated:true,latestCheck:null,secretaryAction:{created_at:plus(-20),review_at:plus(12)}})],
+ ['Telegram contact alone never removes the missing check',m.secretaryHasMissedAction({due:plus(-30),now,delegated:true,latestCheck:null,secretaryAction:{created_at:plus(-20),review_at:plus(12)}})],
  ['Secretary must return after promised follow-up',m.secretaryHasMissedAction({due:plus(-50),now,delegated:true,latestCheck:null,secretaryAction:{created_at:plus(-30),review_at:plus(-3)}})],
- ['New independent check after secretary response closes supervision gap',!m.secretaryHasMissedAction({due:plus(-50),now,delegated:true,latestCheck:{created_at:plus(-15),assessment:'ON_TRACK',next_review_at:null},secretaryAction:{created_at:plus(-30),review_at:plus(-3)}})],
+ ['New check resets the clock only when it is genuinely current',!m.secretaryHasMissedAction({due:m.supervisorDueAt(base,null,{created_at:plus(-3),assessment:'ON_TRACK',next_review_at:null}),now,delegated:true,latestCheck:{created_at:plus(-3),assessment:'ON_TRACK',next_review_at:null},secretaryAction:null})],
  ['Unknown report does not imply no work',!m.documentationLate(null,now)],
  ['Old report is separately detectable',m.documentationLate(plus(-30),now)],
 ];

@@ -30,8 +30,14 @@ Deno.serve(async req=>{
   const init=await loadActiveProject(db,p.initiativeId);
   if(action==='BATCH_UPDATE'){
    requireActive(init);
-   if(profile.id!==init.owner_id && !(await db.from('results').select('id').eq('initiative_id',init.id).eq('owner_id',profile.id).limit(1)).data?.length)
-    throw new Error('يستطيع مسؤول التنفيذ المعين فقط تحديث محطاته.');
+   if(profile.id!==init.owner_id){
+    const resultRows=await db.from('results').select('id').eq('initiative_id',init.id);
+    if(resultRows.error)throw resultRows.error;
+    const resultIds=(resultRows.data||[]).map((x:any)=>x.id);
+    const ownMilestones=resultIds.length?await db.from('milestones').select('id').in('result_id',resultIds).eq('owner_id',profile.id).limit(1):{data:[]};
+    if((ownMilestones as any).error)throw (ownMilestones as any).error;
+    if(!(ownMilestones.data||[]).length)throw new Error('يستطيع مسؤول التنفيذ المعين فقط تحديث محطاته.');
+   }
    if(!uuid(p.requestKey))throw new Error('معرف العملية مطلوب لمنع التكرار.');
    const items=Array.isArray(p.items)?p.items:[];
    if(items.length<1||items.length>8||!items.every((x:any)=>uuid(x.milestoneId)&&['NOT_STARTED','IN_PROGRESS','AT_RISK','BLOCKED','READY_FOR_VERIFICATION'].includes(x.status)))
@@ -48,21 +54,28 @@ Deno.serve(async req=>{
    const assignment=await getAssignedSupervisor(db,init.id);
    const secretary=isSecretary(profile,init);
    const delegate=assignment?.supervisor_id===profile.id&&profile.id!==init.secretary_id;
-   if(!secretary&&!delegate)throw new Error('التحقق الإشرافي متاح للمتابع المعين أو سكرتير المشروع فقط.');
-   if(profile.id===init.owner_id)throw new Error('لا يجوز اعتماد تحقق إشرافي على عمل الشخص نفسه. عيّن متابعًا آخر للمحطة.');
+   if(!secretary&&!delegate)throw new Error('التحقق متاح للمتابع المعين أو السكرتير المختص فقط.');
+   if(profile.id===init.owner_id)throw new Error('لا يجوز للطالب مراجعة عمله بنفسه.');
    const assessment=String(p.assessment||'');const channel=String(p.channel||'');const note=str(p.note);
-   if(!['ON_TRACK','SLOW','NO_WORK','BLOCKED','UNVERIFIED','WAITING_EXTERNAL'].includes(assessment)||!['TELEGRAM','OUTPUT','OTHER'].includes(channel))throw new Error('حدد نتيجة التحقق وطريقته.');
-   if(assessment!=='ON_TRACK'&&note.length<6)throw new Error('صف ما اكتشفته في التحقق باختصار.');
+   if(!['ON_TRACK','SLOW','NO_WORK','BLOCKED','UNVERIFIED','WAITING_EXTERNAL'].includes(assessment)||!['TELEGRAM','OUTPUT','OTHER'].includes(channel)||note.length<6)
+    throw new Error('حدد النتيجة وطريقة التحقق واكتب خلاصة محددة لما تأكدت منه.');
+   const checked=Array.isArray(p.milestoneIds)?p.milestoneIds:[];
+   if(checked.some((x:unknown)=>!uuid(x))||new Set(checked).size!==checked.length)throw new Error('اختيار المحطات غير صحيح.');
    const reviewAt=iso(p.nextReviewAt);
-   if(assessment==='WAITING_EXTERNAL'&&!reviewAt)throw new Error('حدد موعد مراجعة رد الجهة الخارجية.');
-   if(reviewAt&&(new Date(reviewAt).getTime()<=Date.now()||new Date(reviewAt).getTime()>Date.now()+30*86400000))throw new Error('موعد المراجعة يجب أن يكون مستقبلًا خلال 30 يومًا.');
-   if(!uuid(p.requestKey))throw new Error('معرف العملية مطلوب.');
-   const existing=(await db.from('kmsa_flow_checks').select('id').eq('initiative_id',init.id).eq('actor_id',profile.id).eq('request_key',p.requestKey).maybeSingle()).data;
-   if(existing)return json({ok:true,alreadySaved:true,checkId:existing.id});
-   const {data,error}=await db.from('kmsa_flow_checks').insert({initiative_id:init.id,actor_id:profile.id,actor_kind:delegate?'DELEGATE':'SECRETARY_DIRECT',request_key:p.requestKey,assessment,channel,note:note||null,next_review_at:reviewAt}).select('id').single();
-   if(error){if(error.code==='23505')return json({ok:true,alreadySaved:true});throw error;}
-   await audit(db,profile,'FLOW_SUPERVISION_CHECK','INITIATIVE',init.id,null,{checkId:data.id,assessment,channel});
-   return json({ok:true,checkId:data.id});
+   if(assessment==='WAITING_EXTERNAL'&&(!reviewAt||new Date(reviewAt).getTime()>Date.now()+7*86400000))
+    throw new Error('انتظار الجهة الخارجية يحتاج موعد مراجعة خلال أسبوع، ولا يتجاوز موعد التسليم.');
+   const negative=['SLOW','NO_WORK','BLOCKED','UNVERIFIED'].includes(assessment);
+   const required=str(p.followupText,1500),due=iso(p.followupDueAt);
+   if(negative&&(!required||!due||new Date(due).getTime()<=Date.now()))throw new Error('حدد في الخانة نفسها ما يلزم معالجته وموعد مراجعته.');
+   if(!uuid(p.requestKey))throw new Error('معرف العملية مطلوب لمنع التكرار.');
+   const who=uuid(p.followupResponsibleId)?p.followupResponsibleId:(assessment==='UNVERIFIED'?profile.id:init.owner_id);
+   const {data,error}=await db.rpc('kmsa_flow_record_check_v71',{
+    p_initiative:init.id,p_actor:profile.id,p_kind:delegate?'DELEGATE':'SECRETARY_DIRECT',p_request_key:p.requestKey,
+    p_assessment:assessment,p_channel:channel,p_note:note,p_review_at:reviewAt,p_milestone_ids:checked,
+    p_issue_text:negative?required:null,p_issue_due:negative?due:null,p_issue_responsible:negative?who:null
+   });
+   if(error)throw new Error(error.message);
+   return json({ok:true,...(data||{})});
   }
   if(action==='ISSUE_OPEN'){
    requireActive(init);
@@ -96,15 +109,8 @@ Deno.serve(async req=>{
    await audit(db,profile,'FLOW_ISSUE_CLOSE','INITIATIVE',init.id,issue,{resolution});return json({ok:true,issueId:data?.id});
   }
   if(action==='SECRETARY_ACTION'){
-   if(!isSecretary(profile,init))throw new Error('هذا التوثيق من صلاحية السكرتير المعين فقط.');
-   const reason=str(p.reason,1000),outcome=str(p.outcome,1000),kind=String(p.kind||'');
-   if(reason.length<6||outcome.length<6||!['CONTACTED','REASSIGNED','TEMP_UNAVAILABLE','ESCALATED','OTHER'].includes(kind))throw new Error('اختر الإجراء وأدخل ما حدث ونتيجته.');
-   const reviewAt=iso(p.reviewAt);
-   if(!uuid(p.requestKey))throw new Error('معرف العملية مطلوب.');
-   const existed=(await db.from('kmsa_flow_secretary_actions').select('id').eq('initiative_id',init.id).eq('secretary_id',profile.id).eq('request_key',p.requestKey).maybeSingle()).data;
-   if(existed)return json({ok:true,alreadySaved:true,id:existed.id});
-   const {data,error}=await db.from('kmsa_flow_secretary_actions').insert({initiative_id:init.id,secretary_id:profile.id,request_key:p.requestKey,reason,action_kind:kind,outcome_note:outcome,review_at:reviewAt}).select('id').single();if(error){if(error.code==='23505')return json({ok:true,alreadySaved:true});throw error;}
-   await audit(db,profile,'FLOW_SECRETARY_ACTION','INITIATIVE',init.id,null,{id:data.id,kind});return json({ok:true,id:data.id});
+   // Archived actions remain readable. We no longer create a "contacted on Telegram" record.
+   return fail('تدخل السكرتير يتم عبر تيليجرام؛ يحفظ النظام القرارات المؤثرة فقط. استخدم إدارة التكليف أو تعديل الموعد عند اتخاذ قرار.',410);
   }
   return fail('إجراء غير معروف.',400);
  }catch(e:any){const msg=String(e?.message||'تعذر تنفيذ الإجراء.');console.error('project-flow',msg);

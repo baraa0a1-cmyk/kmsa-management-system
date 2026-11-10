@@ -65,6 +65,10 @@ jobs:
         run: node ../../scripts/v6-5-check.mjs
       - name: Verify v6.6 notifications, actions and interface
         run: node ../../scripts/v6-6-check.mjs
+      - name: Verify KMSA Flow v7
+        run: node ../../scripts/check-flow-v7.mjs
+      - name: Verify KMSA Flow v7.1
+        run: node ../../scripts/check-flow-v7-1.mjs
       - name: Build
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
