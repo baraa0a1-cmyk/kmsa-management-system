@@ -1,7 +1,7 @@
 import { supabase } from '../../lib/supabase';
 import { workspaceProjectSheet, workspaceProject } from '../../lib/api';
 import type { ProjectSheetRow, ProjectBundle } from '../../lib/types';
-import {documentationLate,secretaryHasMissedAction,supervisorDueAt,incompleteScope,negativeAssessment} from './flowRules';
+import {documentationLate,secretaryHasMissedAction,supervisorDueAt,coverageCycle,negativeAssessment} from './flowRules';
 
 export type FlowCheck={id:string; initiative_id:string;actor_id:string;actor_kind:'DELEGATE'|'SECRETARY_DIRECT';assessment:'ON_TRACK'|'SLOW'|'NO_WORK'|'BLOCKED'|'UNVERIFIED'|'WAITING_EXTERNAL';channel:string;note:string|null;next_review_at:string|null;milestone_ids:string[];created_at:string};
 export type FlowIssue={id:string;initiative_id:string;milestone_id:string|null;responsible_id:string;description:string;due_at:string|null;status:'OPEN'|'RESOLVED'|'CANCELLED';resolution_note:string|null;created_at:string};
@@ -44,7 +44,7 @@ export async function loadFlowIndex():Promise<{entries:FlowEntry[];decisions:Flo
  const projects=await workspaceProjectSheet();
  if(!projects.length)return {entries:[],decisions:[],pauses:[]};
  const ids=projects.map(x=>x.project_id);
- const [assignments,checks,issues,baselines,decisions,pauses,results]=await Promise.all([
+ const [assignments,checks,issues,baselines,decisions,pauses,results,batches,clocks]=await Promise.all([
   fetchMany('project_supervision_assignments',ids,'initiative_id,supervisor_id,assigned_at,supervisor:profiles!project_supervision_assignments_supervisor_id_fkey(full_name)','assigned_at'),
   fetchMany('kmsa_flow_checks',ids,'id,initiative_id,actor_id,actor_kind,assessment,channel,note,next_review_at,milestone_ids,created_at'),
   fetchMany('kmsa_flow_issues',ids,'id,initiative_id,milestone_id,responsible_id,description,due_at,status,resolution_note,created_at'),
@@ -52,12 +52,14 @@ export async function loadFlowIndex():Promise<{entries:FlowEntry[];decisions:Flo
   fetchMany('project_closure_requests',ids,'id,initiative_id,requested_by,type,reason,requested_at,status','requested_at'),
   // The v6.5 pause table exists on installations that can use this release.
   fetchMany('project_execution_pauses',ids,'*',null).catch((e:any)=>{if(/does not exist|schema cache|PGRST205|42P01/i.test(e?.message||''))return [];throw e;}),
-  fetchMany('results',ids,'id,initiative_id',null)
+  fetchMany('results',ids,'id,initiative_id',null),
+  fetchMany('kmsa_flow_batches',ids,'initiative_id,author_id,created_at'),
+  fetchMany('project_supervision_schedule',ids,'initiative_id,supervisor_id,anchor_at',null)
  ]);
  const milestoneRows=await fetchMilestonesForResults(results.map((x:any)=>x.id));
  const milestoneByResult=new Map<string,typeof milestoneRows>();for(const m of milestoneRows)milestoneByResult.set(m.result_id,[...(milestoneByResult.get(m.result_id)||[]),m]);
  const byProject=<T extends {initiative_id:string}>(xs:T[])=>{const map=new Map<string,T[]>();for(const x of xs)map.set(x.initiative_id,[...(map.get(x.initiative_id)||[]),x]);return map};
- const assignmentsMap=byProject(assignments as FlowAssignment[]),checksMap=byProject(checks as FlowCheck[]),issuesMap=byProject(issues as FlowIssue[]),baselineMap=byProject(baselines as {initiative_id:string;started_at:string}[]),decisionsMap=byProject(decisions as FlowDecision[]),pauseMap=byProject(pauses as FlowPause[]);
+ const assignmentsMap=byProject(assignments as FlowAssignment[]),checksMap=byProject(checks as FlowCheck[]),issuesMap=byProject(issues as FlowIssue[]),baselineMap=byProject(baselines as {initiative_id:string;started_at:string}[]),decisionsMap=byProject(decisions as FlowDecision[]),pauseMap=byProject(pauses as FlowPause[]),batchMap=byProject(batches as {initiative_id:string;author_id:string;created_at:string}[]),clockMap=byProject(clocks as {initiative_id:string;supervisor_id:string;anchor_at:string}[]);
  const entries:FlowEntry[]=projects.map(project=>{
   const resultIds=results.filter((r:any)=>r.initiative_id===project.project_id).map((r:any)=>r.id);
   const projectStages=resultIds.flatMap((id:string)=>milestoneByResult.get(id)||[]).filter(m=>m.design_status!=='REJECTED'&&m.status!=='CANCELLED');
@@ -67,20 +69,21 @@ export async function loadFlowIndex():Promise<{entries:FlowEntry[];decisions:Flo
   const totalMilestones=projectStages.length;const verifiedMilestones=projectStages.filter(m=>m.status==='VERIFIED').length;
   const requiredScope=activeMilestones.map(m=>m.id);
   const assigned=assignmentsMap.get(project.project_id)?.[0]||null;
-  const actorId=assigned?.supervisor_id||project.secretary_id||'';
+  const actorId=clockMap.get(project.project_id)?.[0]?.supervisor_id||assigned?.supervisor_id||project.secretary_id||'';
   // A newly assigned deputy must not inherit missed checks from before their assignment.
   const relevant=(checksMap.get(project.project_id)||[]).filter(c=>c.actor_id===actorId&&(!assigned?.assigned_at||stamp(c.created_at)>=stamp(assigned.assigned_at)));
   const latestCheck=relevant[0]||null;
-  // Partial-scope checks are retained for history, but never reset the project's 12h due clock.
-  const qualifyingCheck=relevant.find(c=>incompleteScope(requiredScope,c.milestone_ids).length===0)||null;
-  const uncoveredMilestones=latestCheck?incompleteScope(requiredScope,latestCheck.milestone_ids):requiredScope;
   const baseline=baselineMap.get(project.project_id)?.[0]?.started_at||null;
-  const due=supervisorDueAt(baseline,assigned?.assigned_at||null,qualifyingCheck);
+  const start=[baseline,assigned?.assigned_at||null,clockMap.get(project.project_id)?.[0]?.anchor_at||null,project.assignment_start_at||null].filter((x):x is string=>!!x).sort((a,b)=>stamp(b)-stamp(a))[0]||null;
+  const {lastComplete,uncovered:uncoveredMilestones}=coverageCycle(requiredScope,relevant,start);
+  const due=requiredScope.length?supervisorDueAt(start,assigned?.assigned_at||null,lastComplete):null;
   const paused=project.lifecycle_state==='POSTPONED'||(pauseMap.get(project.project_id)||[]).some(x=>x.status==='APPROVED'&&(!('pause_until_date' in x)||String((x as any).pause_until_date)>=new Intl.DateTimeFormat('sv-SE',{timeZone:'Africa/Khartoum'}).format(new Date())));
   const needsCheck=flowActive(project)&&!paused&&!!due&&stamp(due)<Date.now();
-  const secretaryInaction=needsCheck&&secretaryHasMissedAction({due,now:Date.now(),delegated:!!assigned?.supervisor_id&&assigned.supervisor_id!==project.secretary_id,latestCheck});
+  const secretaryInaction=needsCheck&&secretaryHasMissedAction({due,now:Date.now(),delegated:actorId!==project.secretary_id,latestCheck});
   // This means "not documented", NOT proof that the student did no actual work.
-  const reportStale=flowActive(project)&&!paused&&activeMilestones.some(m=>m.status!=='READY_FOR_VERIFICATION')&&documentationLate(project.last_lead_update_at,Date.now(),24,baseline);
+  const lastDocumented=[project.last_lead_update_at,...(batchMap.get(project.project_id)||[]).filter(x=>x.author_id===project.lead_id).map(x=>x.created_at)]
+   .filter((x):x is string=>!!x).sort((a,b)=>stamp(b)-stamp(a))[0]||null;
+  const reportStale=flowActive(project)&&!paused&&activeMilestones.some(m=>m.status!=='READY_FOR_VERIFICATION')&&documentationLate(lastDocumented,Date.now(),24,start);
   const openIssues=(issuesMap.get(project.project_id)||[]).filter(i=>i.status==='OPEN');
   const unresolvedFinding=negativeAssessment(latestCheck?.assessment)&&(openIssues.length>0||!(issuesMap.get(project.project_id)||[]).length);
   const needsAttention=!paused&&(unresolvedFinding||openIssues.length>0||reportStale||needsCheck||!!project.current_milestone_overdue||!baseline);

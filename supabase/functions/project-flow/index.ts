@@ -54,10 +54,11 @@ Deno.serve(async req=>{
    const assignment=await getAssignedSupervisor(db,init.id);
    const secretary=isSecretary(profile,init);
    const delegate=assignment?.supervisor_id===profile.id&&profile.id!==init.secretary_id;
-   if(!secretary&&!delegate)throw new Error('التحقق متاح للمتابع المعين أو السكرتير المختص فقط.');
+   const gsIndependent=profile.role==='GS'&&init.owner_id===init.secretary_id;
+   if(!secretary&&!delegate&&!gsIndependent)throw new Error('التحقق متاح للمتابع المعين أو السكرتير المختص فقط.');
    if(profile.id===init.owner_id)throw new Error('لا يجوز للطالب مراجعة عمله بنفسه.');
    const assessment=String(p.assessment||'');const channel=String(p.channel||'');const note=str(p.note);
-   if(!['ON_TRACK','SLOW','NO_WORK','BLOCKED','UNVERIFIED','WAITING_EXTERNAL'].includes(assessment)||!['TELEGRAM','OUTPUT','OTHER'].includes(channel)||note.length<6)
+   if(!['ON_TRACK','SLOW','NO_WORK','BLOCKED','UNVERIFIED','WAITING_EXTERNAL'].includes(assessment)||!['TELEGRAM','OUTPUT','OTHER'].includes(channel)||(assessment!=='ON_TRACK'&&note.length<6))
     throw new Error('حدد النتيجة وطريقة التحقق واكتب خلاصة محددة لما تأكدت منه.');
    const checked=Array.isArray(p.milestoneIds)?p.milestoneIds:[];
    if(checked.some((x:unknown)=>!uuid(x))||new Set(checked).size!==checked.length)throw new Error('اختيار المحطات غير صحيح.');
@@ -66,13 +67,13 @@ Deno.serve(async req=>{
     throw new Error('انتظار الجهة الخارجية يحتاج موعد مراجعة خلال أسبوع، ولا يتجاوز موعد التسليم.');
    const negative=['SLOW','NO_WORK','BLOCKED','UNVERIFIED'].includes(assessment);
    const required=str(p.followupText,1500),due=iso(p.followupDueAt);
-   if(negative&&(!required||!due||new Date(due).getTime()<=Date.now()))throw new Error('حدد في الخانة نفسها ما يلزم معالجته وموعد مراجعته.');
+   if(negative&&required&&(!due||new Date(due).getTime()<=Date.now()))throw new Error('عند إنشاء إجراء مستقل حدد موعد مراجعته.');
    if(!uuid(p.requestKey))throw new Error('معرف العملية مطلوب لمنع التكرار.');
    const who=uuid(p.followupResponsibleId)?p.followupResponsibleId:(assessment==='UNVERIFIED'?profile.id:init.owner_id);
    const {data,error}=await db.rpc('kmsa_flow_record_check_v71',{
     p_initiative:init.id,p_actor:profile.id,p_kind:delegate?'DELEGATE':'SECRETARY_DIRECT',p_request_key:p.requestKey,
     p_assessment:assessment,p_channel:channel,p_note:note,p_review_at:reviewAt,p_milestone_ids:checked,
-    p_issue_text:negative?required:null,p_issue_due:negative?due:null,p_issue_responsible:negative?who:null
+    p_issue_text:negative&&required?required:null,p_issue_due:negative&&required?due:null,p_issue_responsible:negative&&required?who:null
    });
    if(error)throw new Error(error.message);
    return json({ok:true,...(data||{})});

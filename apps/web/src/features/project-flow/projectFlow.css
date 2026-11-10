@@ -22,3 +22,13 @@
 .flow-checkbox-stage textarea:focus,.flow-checkbox-stage input:not([type="checkbox"]):focus{outline:2px solid #d9a8b5;outline-offset:1px}
 .flow-supervision-card .flow-supervision-facts strong{overflow-wrap:anywhere}
 @media(max-width:760px){.flow-attention-input{padding:12px}.flow-checkbox-stage textarea{min-width:0}}
+
+/* v7.2 — all administrative actions stay on the project detail page. */
+.flow-management{margin-block:1.3rem}
+.flow-management-actions{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;margin-block:.8rem}
+.flow-management-form{display:grid;gap:.6rem;max-width:620px;padding:1.15rem;margin-block:1rem;border:1px solid var(--flow-border, #d9e1df);border-radius:14px;background:var(--flow-surface,#f7f9f8)}
+.flow-management-form label{font-weight:650}
+.flow-management-form textarea,.flow-management-form input,.flow-management-form select,.flow-management-notice textarea{width:100%;min-height:42px;border-radius:9px;padding:.7rem;border:1px solid #aebfba;background:var(--flow-card,#fff);color:inherit}
+.flow-management-form textarea,.flow-management-notice textarea{min-height:80px}
+.flow-management-notice{border-inline-start:3px solid #ad8652;background:var(--flow-surface,#f7f9f8);padding:1rem;border-radius:10px;margin-block:.8rem}
+.flow-management-notice p{margin:.5rem 0}
