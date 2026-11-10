@@ -56,7 +56,7 @@ export async function loadFlowIndex():Promise<{entries:FlowEntry[];decisions:Flo
   fetchMany('results',ids,'id,initiative_id',null),
   fetchMany('kmsa_flow_batches',ids,'initiative_id,author_id,created_at'),
   fetchMany('project_supervision_schedule',ids,'initiative_id,supervisor_id,anchor_at',null),
-  fetchMany('kmsa_supervision_oversight',ids,'id,initiative_id,supervisor_id,secretary_id,late_due_at,review_kind,note,reviewed_at,follow_up_due_at'),
+  fetchMany('kmsa_supervision_oversight',ids,'id,initiative_id,supervisor_id,secretary_id,late_due_at,review_kind,note,reviewed_at,follow_up_due_at','reviewed_at'),
  ]);
  const milestoneRows=await fetchMilestonesForResults(results.map((x:any)=>x.id));
  const milestoneByResult=new Map<string,typeof milestoneRows>();for(const m of milestoneRows)milestoneByResult.set(m.result_id,[...(milestoneByResult.get(m.result_id)||[]),m]);
@@ -100,7 +100,7 @@ export async function loadFlowDetail(id:string):Promise<{bundle:ProjectBundle;ch
   workspaceProject(id),fetchMany('kmsa_flow_checks',[id],'id,initiative_id,actor_id,actor_kind,assessment,channel,note,next_review_at,milestone_ids,created_at'),
   fetchMany('kmsa_flow_issues',[id],'id,initiative_id,milestone_id,responsible_id,description,due_at,status,resolution_note,created_at'),
   fetchMany('kmsa_flow_baselines',[id],'initiative_id,started_at','started_at'),
-  fetchMany('kmsa_supervision_oversight',[id],'id,initiative_id,supervisor_id,secretary_id,late_due_at,review_kind,note,reviewed_at,follow_up_due_at'),
+  fetchMany('kmsa_supervision_oversight',[id],'id,initiative_id,supervisor_id,secretary_id,late_due_at,review_kind,note,reviewed_at,follow_up_due_at','reviewed_at'),
   fetchMany('project_supervision_assignments',[id],'initiative_id,supervisor_id,assigned_at',null),
   fetchMany('project_supervision_schedule',[id],'initiative_id,supervisor_id,anchor_at',null)
  ]);
