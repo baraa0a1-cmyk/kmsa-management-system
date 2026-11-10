@@ -57,6 +57,8 @@ jobs:
       # The v7.2 suite is the authoritative project invariant suite; compatible older checks remain above.
       - name: Verify final project flow v7.2 (24h, deadlines, lifecycle, safety)
         run: node ../../scripts/check-projects-v7-2.mjs
+      - name: Verify project and supervision v7.3 (four-role operations)
+        run: node ../../scripts/check-projects-v7-3.mjs
       - name: Build
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}

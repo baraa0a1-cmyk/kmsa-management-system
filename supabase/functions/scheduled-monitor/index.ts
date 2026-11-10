@@ -30,7 +30,7 @@ Deno.serve(async(req)=>{if(req.method==='OPTIONS')return new Response('ok',{head
   const {data:unfinished}=await db.from('milestones').select('id,result:results!inner(initiative_id)').eq('result.initiative_id',project.id).neq('design_status','REJECTED').not('status','in','("VERIFIED","CANCELLED","READY_FOR_VERIFICATION")').limit(1);
   if(!(unfinished||[]).length)continue;
   const {data:baselineRows}=await db.from('kmsa_flow_baselines').select('started_at').eq('initiative_id',project.id).maybeSingle();
-  const {data:lastBatch}=await db.from('kmsa_flow_batches').select('created_at').eq('initiative_id',project.id).order('created_at',{ascending:false}).limit(1);
+  const {data:lastBatch}=await db.from('kmsa_flow_batches').select('created_at').eq('initiative_id',project.id).eq('author_id',project.owner_id).order('created_at',{ascending:false}).limit(1);
   const anchor=Math.max(started,new Date(baselineRows?.started_at||0).getTime()||0,new Date(lastBatch?.[0]?.created_at||0).getTime()||0);
   if(!anchor||nowMs-anchor<24*3600000)continue;
   const event='KMSA_V72_PROJECT_DAILY_UPDATE';if(await recently(db,event,'INITIATIVE',project.id,23))continue;
@@ -43,6 +43,22 @@ Deno.serve(async(req)=>{if(req.method==='OPTIONS')return new Response('ok',{head
  for(const clock of supervisorClocks||[]){if(pausedIds.has(clock.initiative_id))continue;
   const project=(await db.from('initiatives').select('id,title,secretary_id,cycle_id,status,lifecycle_state,setup_status,approval_status').eq('id',clock.initiative_id).maybeSingle()).data;
   if(!project||project.cycle_id!==currentCycleId||project.setup_status!=='ACTIVE'||project.approval_status!=='APPROVED'||['COMPLETED','CANCELLED'].includes(project.status)||project.lifecycle_state==='POSTPONED')continue;
+  const ass=(await db.from('project_supervision_assignments').select('supervisor_id,assigned_at').eq('initiative_id',project.id).maybeSingle()).data;
+  const delegated=!!ass?.supervisor_id&&ass.supervisor_id!==project.secretary_id&&ass.supervisor_id===clock.supervisor_id;
+  if(delegated){
+    const {data:reviews}=await db.from('kmsa_supervision_oversight').select('reviewed_at,follow_up_due_at').eq('initiative_id',project.id).eq('supervisor_id',clock.supervisor_id).order('reviewed_at',{ascending:false}).limit(1);
+    const recent=reviews?.[0];const secretaryReviewNeeded=!recent||new Date(recent.reviewed_at).getTime()<new Date(clock.next_due_at).getTime();
+    const secretaryFollowup=!!recent&&!secretaryReviewNeeded&&new Date(recent.follow_up_due_at).getTime()<nowMs;
+    if(secretaryReviewNeeded||secretaryFollowup){
+      const type=secretaryReviewNeeded?'KMSA_V73_SECRETARY_OVERSIGHT':'KMSA_V73_SECRETARY_FOLLOW_UP';
+      if(!await recently(db,type,'INITIATIVE',project.id,23)){
+        await inboxNotify(db,project.secretary_id,type,
+          secretaryReviewNeeded?`مشروع ${project.title}: راجع تأخر المتابع`:`مشروع ${project.title}: تأخر المتابع لم يُحسم بعد المراجعة`,
+          secretaryReviewNeeded?'المتابع متأخر عن التحقق. راجع الحالة وسجل واقعة المراجعة فقط؛ تأخر المتابع يبقى حتى يتحقق فعلياً.':'راجع استمرار التأخر واتخذ قرار إعادة الإسناد عند الحاجة. لا تكرر تسجيل المراجعة نفسها.',
+          'INITIATIVE',project.id,`/workspace/projects/${project.id}?view=supervision`);
+      }
+    }
+  }
   const event='KMSA_V65_SUPERVISOR_CHECK';if(await recently(db,event,'INITIATIVE',project.id,23))continue;
   const delivered=await inboxNotify(db,clock.supervisor_id,event,`مشروع ${project.title}: مطلوب تحقق إشرافي`, 'انقضى استحقاق التحقق الإشرافي خلال 24 ساعة. تواصل أو راجع مخرجات العمل، ثم سجل ما ثبت لديك دون انتظار إفادة المسؤول.', 'INITIATIVE',project.id,`/workspace/projects/${project.id}?action=verify`);
   if(delivered)await db.from('notification_log').insert({channel:'SYSTEM',recipient:clock.supervisor_id,event_type:event,entity_type:'INITIATIVE',entity_id:project.id,status:'SENT'});

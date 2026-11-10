@@ -32,3 +32,35 @@
 .flow-management-form textarea,.flow-management-notice textarea{min-height:80px}
 .flow-management-notice{border-inline-start:3px solid #ad8652;background:var(--flow-surface,#f7f9f8);padding:1rem;border-radius:10px;margin-block:.8rem}
 .flow-management-notice p{margin:.5rem 0}
+
+/* KMSA 7.3 — clear hierarchy, compact project management, progressive disclosure */
+.flow-detail-hero{position:relative;padding-inline-start:156px;overflow:visible;background:linear-gradient(160deg,#fff 82%,#f7faf9)}
+.flow-project-menu{position:absolute;left:20px;top:20px;z-index:15;direction:rtl}
+.flow-project-menu-trigger{display:inline-flex;align-items:center;gap:8px;color:#30504d;background:#f0f5f3;border:1px solid #dce8e3;padding:10px 13px;border-radius:11px;font:inherit;font-size:12px;font-weight:750;cursor:pointer}
+.flow-project-menu-trigger:hover,.flow-project-menu-trigger[aria-expanded=true]{background:#e2efea;border-color:#bfd8ce}
+.flow-project-menu-list{position:absolute;left:0;top:calc(100% + 7px);min-width:230px;background:#fff;box-shadow:0 18px 55px #20393126;border:1px solid #dce5e0;border-radius:13px;padding:6px;display:grid;z-index:35}
+.flow-project-menu-list button{font:inherit;font-size:12px;text-align:right;cursor:pointer;background:none;border:0;border-radius:8px;padding:11px 12px;color:#243e3a;white-space:nowrap}
+.flow-project-menu-list button:hover,.flow-project-menu-list button:focus-visible{background:#f0f6f3;outline:none}
+.flow-management-dialog{width:min(640px,96vw);max-height:calc(100dvh - 40px);overflow-y:auto;box-shadow:0 22px 90px #0f282e42}
+.flow-management-dialog .flow-section-head{display:none}.flow-management-dialog .flow-management-actions{display:flex;gap:7px;flex-wrap:wrap;margin:7px 0 15px}
+.flow-management-dialog .flow-management-actions button{font-size:11px}.flow-management-dialog .flow-management-form{margin:0;max-width:none}
+.flow-oversight-banner,.flow-role-banner{display:flex;align-items:start;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:16px 18px;border:1px solid #e9d7be;border-inline-start:4px solid #ba8652;background:#fffcf7;border-radius:14px;margin-bottom:14px}
+.flow-role-banner{border-color:#d8e4e3;border-inline-start-color:#548d84;background:#f7faf9}
+.flow-oversight-banner strong,.flow-role-banner strong{font-size:13px;color:#35443f}
+.flow-oversight-banner p,.flow-role-banner p{font-size:11px;color:#6c7c76;line-height:1.85;margin:5px 0 0;max-width:690px}
+.flow-oversight-actions,.flow-role-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.flow-oversight-actions label{font-size:11px;font-weight:700}
+.flow-oversight-actions select,.flow-oversight-actions input,.flow-role-actions textarea{border:1px solid #cddbd5;border-radius:9px;padding:9px;min-height:36px;background:#fff;font:inherit;font-size:11px;color:#2e4944}
+.flow-role-actions textarea{width:100%;min-width:250px}
+.flow-role-hint{display:flex;align-items:center;gap:9px;padding:10px 13px;margin:0 0 14px;border-bottom:1px solid #dce9e6;color:#476b61;font-size:11px;line-height:1.8}
+.flow-role-hint svg{flex-shrink:0}
+.workspace-create-hero{background:linear-gradient(120deg,#f9fcfb,#fff);padding:22px 24px;border:1px solid #e2eae6;border-radius:19px}
+.workspace-create-readiness{display:flex;justify-content:space-between;gap:15px;align-items:center;flex-wrap:wrap;border:1px solid #dce8e2;border-radius:14px;padding:16px 19px;background:#f8fbf9}
+.workspace-create-readiness>div:first-child{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.workspace-create-readiness strong{color:#2f4d44;font-size:13px}.workspace-create-readiness>div:first-child span{font-size:11px;color:#758980}
+.workspace-readiness-items{display:flex;flex-wrap:wrap;gap:8px}
+.workspace-readiness-items span{display:inline-flex;align-items:center;gap:5px;background:#fff;border-radius:25px;border:1px solid #e0e9e4;padding:6px 9px;font-size:11px;color:#946a53}
+.workspace-readiness-items span.ready{color:#367864;border-color:#bfddce;background:#f4fbf7}
+.workspace-create-page .workspace-form-section{box-shadow:none;border-color:#e2eae6}
+.workspace-create-page .workspace-section-number{background:#e7f1eb;color:#3f6958}
+.workspace-create-page .workspace-builder-row{border-color:#e3eae7;border-radius:12px}
+@media(max-width:760px){.flow-detail-hero{padding:66px 16px 18px}.flow-project-menu{top:13px;left:13px}.flow-project-menu-trigger{padding:7px 10px;font-size:11px}.flow-project-menu-list{max-width:calc(100vw - 30px)}.flow-role-actions,.flow-oversight-actions{width:100%}.flow-oversight-actions select,.flow-oversight-actions input,.flow-oversight-actions button{flex:1 1 130px}.workspace-create-hero{padding:16px}.workspace-create-readiness{padding:12px}}
+@media(prefers-reduced-motion:reduce){.flow-project-menu *{transition:none!important}}

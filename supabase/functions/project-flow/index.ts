@@ -40,8 +40,8 @@ Deno.serve(async req=>{
    }
    if(!uuid(p.requestKey))throw new Error('معرف العملية مطلوب لمنع التكرار.');
    const items=Array.isArray(p.items)?p.items:[];
-   if(items.length<1||items.length>8||!items.every((x:any)=>uuid(x.milestoneId)&&['NOT_STARTED','IN_PROGRESS','AT_RISK','BLOCKED','READY_FOR_VERIFICATION'].includes(x.status)))
-    throw new Error('حدد من محطة واحدة حتى ثماني محطات، وحالة صحيحة لكل منها.');
+   if(items.length<1||items.length>30||!items.every((x:any)=>uuid(x.milestoneId)&&['NOT_STARTED','IN_PROGRESS','AT_RISK','BLOCKED','READY_FOR_VERIFICATION'].includes(x.status)))
+    throw new Error('حدد من محطة واحدة حتى ثلاثين محطة، وحالة صحيحة لكل منها.');
    const note=str(p.note,3000),nextStep=str(p.nextStep,1000);
    if(note.length<8)throw new Error('اكتب ما حدث بصورة مختصرة (8 حروف على الأقل).');
    if(items.some((x:any)=>x.status!=='READY_FOR_VERIFICATION')&&!nextStep)throw new Error('حدد الخطوة القادمة للمحطات الجارية.');
@@ -108,6 +108,45 @@ Deno.serve(async req=>{
    const resolution=str(p.resolution,1000);if(resolution.length<6)throw new Error('وضح كيف تأكدت من معالجة المشكلة.');
    const {data,error}=await db.from('kmsa_flow_issues').update({status:'RESOLVED',resolution_note:resolution,closed_by:profile.id,closed_at:new Date().toISOString()}).eq('id',issue.id).eq('status','OPEN').select('id').maybeSingle();if(error)throw error;
    await audit(db,profile,'FLOW_ISSUE_CLOSE','INITIATIVE',init.id,issue,{resolution});return json({ok:true,issueId:data?.id});
+  }
+  if(action==='SECRETARY_REVIEW_DELAY'){
+   requireActive(init);
+   if(!isSecretary(profile,init)||profile.id===init.owner_id)throw new Error('مراجعة تأخر المفوض من اختصاص السكرتير المختص.');
+   const assignment=await getAssignedSupervisor(db,init.id);
+   if(!assignment?.supervisor_id||assignment.supervisor_id===profile.id)throw new Error('لا يوجد متابع مفوض لهذا المشروع.');
+   const actionType=String(p.reviewKind||'');
+   if(!['REVIEWED_RECORD','CONTACTED_SUPERVISOR'].includes(actionType))throw new Error('حدد ما الذي راجعته فعلياً.');
+   const [res,oldChecks,baselineRow,clockRow]=await Promise.all([
+    db.from('results').select('id').eq('initiative_id',init.id),
+    db.from('kmsa_flow_checks').select('created_at,milestone_ids').eq('initiative_id',init.id).eq('actor_id',assignment.supervisor_id).gte('created_at',assignment.assigned_at).order('created_at',{ascending:true}),
+    db.from('kmsa_flow_baselines').select('started_at').eq('initiative_id',init.id).maybeSingle(),
+    db.from('project_supervision_schedule').select('anchor_at').eq('initiative_id',init.id).eq('supervisor_id',assignment.supervisor_id).maybeSingle()
+   ]);
+   if(res.error||oldChecks.error||baselineRow.error||clockRow.error)throw new Error('تعذر التحقق من حالة الاستحقاق.');
+   const resultIds=(res.data||[]).map((r:any)=>r.id);
+   const q=resultIds.length?await db.from('milestones').select('id,status,due_at,design_status').in('result_id',resultIds):{data:[],error:null};
+   if(q.error)throw q.error;
+   const stages=(q.data||[]).filter((m:any)=>m.design_status!=='REJECTED'&&m.status!=='CANCELLED');
+   const working=stages.filter((m:any)=>['IN_PROGRESS','AT_RISK','BLOCKED','READY_FOR_VERIFICATION'].includes(m.status));
+   const required=(working.length?working:[...stages].filter((m:any)=>m.status==='NOT_STARTED').sort((a:any,b:any)=>Date.parse(a.due_at||'')-Date.parse(b.due_at||'')).slice(0,1)).map((m:any)=>m.id);
+   if(!required.length)throw new Error('لا توجد محطات يلزم التحقق منها حالياً.');
+   const parse=(s:any)=>s?Date.parse(s):NaN;
+   const start=Math.max(0,...[init.assignment_start_at,assignment.assigned_at,baselineRow.data?.started_at,clockRow.data?.anchor_at].map(parse).filter(Number.isFinite));
+   let seen=new Set<string>(),opened=NaN,lastComplete=NaN;
+   for(const c of oldChecks.data||[]){const at=parse(c.created_at);if(at<start)continue;
+    if(Number.isFinite(opened)&&at-opened>86400000){seen=new Set();opened=NaN;}
+    const matched=(c.milestone_ids||[]).filter((id:string)=>required.includes(id));if(!matched.length)continue;
+    if(!Number.isFinite(opened))opened=at;for(const mid of matched)seen.add(mid);
+    if(required.every((mid:string)=>seen.has(mid))){lastComplete=at;seen=new Set();opened=NaN;}
+   }
+   const due=new Date(Math.max(start,lastComplete||0)+86400000);
+   if(!Number.isFinite(due.getTime())||due.getTime()>=Date.now())throw new Error('المتابع ليس متأخراً في استحقاقه الحالي.');
+   if(Math.abs(parse(p.lateDueAt)-due.getTime())>1000)throw new Error('تغير استحقاق المتابعة. حدث الصفحة ثم حاول مجدداً.');
+   const paused=(await db.from('project_execution_pauses').select('id').eq('initiative_id',init.id).eq('status','APPROVED').gte('pause_until_date',new Intl.DateTimeFormat('sv-SE',{timeZone:'Africa/Khartoum'}).format(new Date())).limit(1)).data;
+   if(paused?.length)throw new Error('المشروع متوقف مؤقتاً؛ لا تسجل عليه تأخيراً جديداً.');
+   const {data,error}=await db.rpc('kmsa_v73_record_supervision_review',{p_initiative:init.id,p_secretary:profile.id,p_supervisor:assignment.supervisor_id,p_late_due_at:due.toISOString(),p_review_kind:actionType,p_note:str(p.note,1000)||null});
+   if(error)throw new Error(error.message);
+   return json({ok:true,...(data||{})});
   }
   if(action==='SECRETARY_ACTION'){
    // Archived actions remain readable. We no longer create a "contacted on Telegram" record.

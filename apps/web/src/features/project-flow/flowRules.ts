@@ -44,3 +44,11 @@ export function coverageCycle(required:string[],checks:CheckClock[],startAt:stri
  }
  return {lastComplete,uncovered:required.filter(id=>!seen.has(id))};
 }
+
+/** Delayed check and administrative review are separate facts. Review does not clear a supervisor's debt. */
+export type OversightRecord={late_due_at:string;reviewed_at:string;follow_up_due_at:string};
+export function supervisionOversightState(input:{due:string|null;now:number;delegated:boolean;needsCheck:boolean;paused:boolean;ack?:OversightRecord|null}):'NONE'|'NEEDS_REVIEW'|'REVIEWED_WAITING'|'FOLLOW_UP_DUE'{
+ if(input.paused||!input.needsCheck||!input.delegated||!input.due)return 'NONE';
+ if(!input.ack||Math.abs(time(input.ack.late_due_at)-time(input.due))>=1000)return 'NEEDS_REVIEW';
+ return time(input.ack.follow_up_due_at)<=input.now?'FOLLOW_UP_DUE':'REVIEWED_WAITING';
+}
